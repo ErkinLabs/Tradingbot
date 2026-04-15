@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(py -m pytest tests/ -v)",
+      "Bash(py -m pytest tests/ -v --tb=short)",
+      "Bash(python -m pytest tests/ -x -q)",
+      "Bash(python3 -m pytest tests/ -x -q)",
+      "Bash(where python:*)",
+      "Bash(where py:*)",
+      "Bash(where python3:*)",
+      "Bash(py -m pytest tests/ -x -q)",
+      "Bash(py run_backtest.py --strategy rsi_vwap --symbol BTC/USDT --start 2024-01-01 --end 2024-12-31)",
+      "Bash(python run_backtest.py --strategy macd --symbol BTC/USDT --start 2024-01-01 --end 2024-12-31)",
+      "Bash(py --version)",
+      "Bash(py run_backtest.py --strategy macd --symbol BTC/USDT --start 2024-01-01 --end 2024-12-31)",
+      "Bash(python3 -c \"import config; print\\('config ok'\\)\")",
+      "Bash(C:\\\\Users\\\\hayre\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\python3.exe:*)",
+      "Read(//usr/**)",
+      "Read(//usr/local/**)",
+      "Bash(/c/Users/hayre/AppData/Local/Microsoft/WindowsApps/python:*)",
+      "Bash(/c/Users/hayre/AppData/Local/Programs/Python/Python313/python.exe:*)",
+      "Bash(python audit_macd_exits.py)",
+      "Bash(python3 audit_macd_exits.py)",
+      "Bash(\"C:\\\\Users\\\\hayre\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe\" audit_macd_exits.py)",
+      "Bash(git -C \"D:/PROJECTS/CLAUDE/CRYPTOBOT/trading-bots\" log --oneline -10)"
+    ]
+  }
+}

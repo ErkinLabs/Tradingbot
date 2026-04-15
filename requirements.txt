@@ -1,0 +1,7 @@
+ccxt
+pandas
+pandas_ta
+rich
+pyarrow
+python-dotenv
+pytest
