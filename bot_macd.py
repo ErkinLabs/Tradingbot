@@ -4,9 +4,8 @@ Bot 1 — MACD Momentum Strategy (Spot)
 Timeframe  : 5-minute candles
 Signal     : MACD histogram zero-cross
               prev_hist < 0 AND curr_hist > 0  ->  BUY  (long)
-Exit (tiered):
+Exit (patient):
   Strong reversal — MACD line crosses below zero AND histogram negative
-  3-bar confirmed — 3 consecutive strictly-declining negative histogram bars
 Filters:
   1. EMA200 trend: long only above EMA200
   2. ADX >= 20: confirmed trending market (filters choppy/sideways regimes)
@@ -150,13 +149,9 @@ class MACDBot(BaseBot):
         hist_growing = abs(curr_hist) > abs(prev_hist)
 
         if position == "long":
-            # Strong reversal: MACD line itself has gone negative (12/26 EMA cross reversed)
-            # AND histogram is negative — requires a genuine sustained trend reversal.
-            strong_reversal = macd_line < 0 and curr_hist < 0
-            # 3-bar confirmed: three consecutive strictly-declining negative histogram bars.
-            # Confirms momentum has reversed without exiting on brief 1-2 bar dips.
-            three_bar_confirmed = curr_hist < prev_hist < prev2_hist < 0
-            if strong_reversal or three_bar_confirmed:
+            # Patient exit: wait for MACD line itself to go negative (12/26 EMA cross reversed)
+            # AND histogram negative — requires a genuine sustained trend reversal.
+            if macd_line < 0 and curr_hist < 0:
                 return "close"
 
         else:  # flat — zero-cross entry
