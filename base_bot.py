@@ -22,6 +22,8 @@ import math
 import os
 import threading
 import time
+import urllib.parse
+import urllib.request
 from datetime import date, datetime, timezone
 from typing import Dict, List, Optional
 
@@ -30,6 +32,37 @@ import pandas as pd
 
 import config
 from kline_buffer import KlineBuffer
+
+
+# ── Telegram notifier ─────────────────────────────────────────────────────────
+
+class _TelegramNotifier:
+    """
+    Fire-and-forget Telegram notifications via the Bot API.
+    Disabled automatically when TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is absent.
+    """
+
+    def __init__(self) -> None:
+        self._token   = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        self._chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+        self.enabled  = bool(self._token and self._chat_id)
+
+    def send(self, text: str) -> None:
+        """Send a message in a background thread so it never blocks the bot loop."""
+        if not self.enabled:
+            return
+        threading.Thread(target=self._post, args=(text,), daemon=True).start()
+
+    def _post(self, text: str) -> None:
+        url  = f"https://api.telegram.org/bot{self._token}/sendMessage"
+        data = urllib.parse.urlencode({"chat_id": self._chat_id, "text": text}).encode()
+        try:
+            urllib.request.urlopen(url, data=data, timeout=10)
+        except Exception:
+            pass  # non-fatal — never let a notification failure affect trading
+
+
+_tg = _TelegramNotifier()
 
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -293,6 +326,13 @@ class BaseBot:
             "OPEN %s %s | price=%.4f | size=%.6f | notional=%.2f | commission=%.4f USDT",
             side.upper(), symbol, price, size, notional, comm,
         )
+        _tg.send(
+            f"📈 [{self.name}] OPEN {side.upper()}\n"
+            f"Symbol : {symbol}\n"
+            f"Price  : {price:.4f} USDT\n"
+            f"Size   : {size:.6f}\n"
+            f"Notional: {notional:.2f} USDT"
+        )
         _save_state(self.name, self.positions, self.closed_trades, self.balance)
 
     def close_position(self, symbol: str, reason: str = "signal") -> Optional[float]:
@@ -334,6 +374,15 @@ class BaseBot:
         self.log.info(
             "CLOSE %s | entry=%.4f exit=%.4f | gross=%.4f comm=%.4f net=%.4f | reason=%s",
             symbol, pos["entry_price"], price, gross_pnl, comm, net_pnl, reason,
+        )
+        emoji  = "✅" if net_pnl >= 0 else "❌"
+        pnl_sign = "+" if net_pnl >= 0 else ""
+        _tg.send(
+            f"{emoji} [{self.name}] CLOSE\n"
+            f"Symbol : {symbol}\n"
+            f"Entry  : {pos['entry_price']:.4f} → Exit: {price:.4f} USDT\n"
+            f"Net PnL: {pnl_sign}{net_pnl:.4f} USDT\n"
+            f"Reason : {reason}"
         )
         return net_pnl
 
