@@ -508,3 +508,6 @@
 2026-04-15 22:16:55,592 [RSI_VWAP] ERROR Error processing SOL/USDT: 'SOL/USDT'
 2026-04-15 22:16:55,592 [CVD] ERROR Error processing BTC/USDT: 'BTC/USDT'
 2026-04-15 22:16:55,593 [CVD] ERROR Error processing SOL/USDT: 'SOL/USDT'
+2026-04-15 22:25:14,751 [MACD] INFO Initialised | balance=3300.00 USDT | symbols=['BTC/USDT', 'SOL/USDT'] | restored=False
+2026-04-15 22:25:22,898 [RSI_VWAP] INFO Initialised | balance=3300.00 USDT | symbols=['BTC/USDT', 'SOL/USDT'] | restored=False
+2026-04-15 22:25:26,351 [CVD] INFO Initialised | balance=3400.00 USDT | symbols=['BTC/USDT', 'SOL/USDT'] | restored=False
