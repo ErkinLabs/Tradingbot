@@ -160,6 +160,9 @@ class CVDBot(BaseBot):
     # ── Per-symbol live logic ─────────────────────────────────────────────────
 
     def _process_symbol(self, symbol: str) -> None:
+        if symbol not in self._buffers:
+            self.log.debug("Buffer not yet attached for %s — skipping.", symbol)
+            return
         df = self._buffers[symbol].get_df()
         if len(df) < _MIN_BARS:
             return

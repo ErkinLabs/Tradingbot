@@ -499,3 +499,12 @@
 2026-04-07 18:03:00,942 [MACD] INFO Initialised | balance=3300.00 USDT | symbols=['BTC/USDT', 'SOL/USDT'] | restored=False
 2026-04-07 19:00:00,448 [MACD] INFO Initialised | balance=3300.00 USDT | symbols=['BTC/USDT', 'SOL/USDT'] | restored=False
 2026-04-15 21:37:47,761 [MACD] INFO Initialised | balance=3300.00 USDT | symbols=['BTC/USDT', 'SOL/USDT'] | restored=False
+2026-04-15 22:16:49,968 [MACD] INFO Initialised | balance=3300.00 USDT | symbols=['BTC/USDT', 'SOL/USDT'] | restored=False
+2026-04-15 22:16:52,502 [RSI_VWAP] INFO Initialised | balance=3300.00 USDT | symbols=['BTC/USDT', 'SOL/USDT'] | restored=False
+2026-04-15 22:16:55,586 [CVD] INFO Initialised | balance=3400.00 USDT | symbols=['BTC/USDT', 'SOL/USDT'] | restored=False
+2026-04-15 22:16:55,591 [MACD] ERROR Error processing BTC/USDT: 'BTC/USDT'
+2026-04-15 22:16:55,592 [MACD] ERROR Error processing SOL/USDT: 'SOL/USDT'
+2026-04-15 22:16:55,592 [RSI_VWAP] ERROR Error processing BTC/USDT: 'BTC/USDT'
+2026-04-15 22:16:55,592 [RSI_VWAP] ERROR Error processing SOL/USDT: 'SOL/USDT'
+2026-04-15 22:16:55,592 [CVD] ERROR Error processing BTC/USDT: 'BTC/USDT'
+2026-04-15 22:16:55,593 [CVD] ERROR Error processing SOL/USDT: 'SOL/USDT'

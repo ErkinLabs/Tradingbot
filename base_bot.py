@@ -203,6 +203,9 @@ class BaseBot:
         Replaces the timer-based run_once() loop for live trading.
         Subclasses must implement _process_symbol() to consume the buffer.
         """
+        if symbol not in self._buffers:
+            self.log.warning("on_candle_close fired for unregistered symbol %s — ignoring.", symbol)
+            return
         if self.check_daily_loss():
             return
         self.check_stop_loss_take_profit()

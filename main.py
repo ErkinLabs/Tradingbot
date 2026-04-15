@@ -11,7 +11,6 @@ Features
 """
 
 import signal
-import sys
 import threading
 import time
 
@@ -24,19 +23,10 @@ from bot_macd     import MACDBot
 from bot_rsi_vwap import RSIVWAPBot
 from bot_cvd      import CVDBot
 from dashboard    import Dashboard
+from kline_buffer import KlineBuffer
+from kline_stream import KlineStreamManager
 
 console = Console()
-
-
-# ── Bot thread worker ─────────────────────────────────────────────────────────
-
-def _bot_worker(bot, stop_event: threading.Event) -> None:
-    while not stop_event.is_set():
-        try:
-            bot.run_once()
-        except Exception as exc:
-            bot.log.error("Unhandled exception in run_once: %s", exc, exc_info=True)
-        stop_event.wait(timeout=config.BOT_LOOP_SECS)
 
 
 # ── Startup summary ───────────────────────────────────────────────────────────
@@ -123,6 +113,29 @@ def main() -> None:
 
     _print_startup_summary(bots)
 
+    # ── Seed candle buffers from REST warmup ──────────────────────────────────
+    console.print("[bold cyan]Seeding candle buffers from REST…[/bold cyan]")
+    buffers: dict[tuple, KlineBuffer] = {}
+    for bot in bots:
+        for symbol in config.SYMBOLS:
+            key = (symbol, bot.timeframe)
+            if key not in buffers:
+                buf = KlineBuffer(maxlen=config.WARMUP_BARS)
+                df  = bot.fetch_ohlcv(symbol, bot.timeframe)
+                buf.seed(df)
+                buffers[key] = buf
+                console.print(f"  [green]✓[/green] Seeded {symbol} {bot.timeframe} ({len(df)} bars)")
+            bot.attach_buffer(symbol, buffers[key])
+
+    # ── Wire up WebSocket kline stream ────────────────────────────────────────
+    console.print("[bold cyan]Starting WebSocket kline stream…[/bold cyan]")
+    mgr = KlineStreamManager()
+    for bot in bots:
+        for symbol in config.SYMBOLS:
+            mgr.register(symbol, bot.timeframe, buffers[(symbol, bot.timeframe)], bot.on_candle_close)
+    mgr.start()
+    console.print("  [green]✓[/green] WebSocket streams active\n")
+
     stop_event = threading.Event()
 
     # Handle Ctrl+C / SIGTERM
@@ -133,25 +146,12 @@ def main() -> None:
     signal.signal(signal.SIGINT,  _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    # Start bot threads
-    threads = []
-    for bot in bots:
-        t = threading.Thread(
-            target=_bot_worker,
-            args=(bot, stop_event),
-            daemon=True,
-            name=f"Bot-{bot.name}",
-        )
-        t.start()
-        threads.append(t)
-        console.print(f"  [green]✓[/green] {bot.name} bot started")
-
     # Start dashboard
     dash = Dashboard(bots)
     dash.start()
-    console.print("\n[bold cyan]All bots running. Press Ctrl+C to stop.[/bold cyan]\n")
+    console.print("[bold cyan]All bots running. Press Ctrl+C to stop.[/bold cyan]\n")
 
-    # Wait until shutdown
+    # Wait until shutdown — signals arrive via on_candle_close callbacks
     try:
         while not stop_event.is_set():
             time.sleep(1)
@@ -161,8 +161,7 @@ def main() -> None:
     # Graceful teardown
     stop_event.set()
     dash.stop()
-    for t in threads:
-        t.join(timeout=5)
+    mgr.stop()
 
     _print_final_stats(bots)
     console.print("\n[bold green]Shutdown complete.[/bold green]")
