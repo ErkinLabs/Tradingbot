@@ -151,14 +151,20 @@ def build_layout(bots) -> Panel:
 
 # ── Dashboard runner ──────────────────────────────────────────────────────────
 
+import os as _os
+
 class Dashboard:
+    """Live Rich dashboard. Disabled when HEADLESS=true (e.g. on a VPS/Docker)."""
+
     def __init__(self, bots) -> None:
-        self.bots    = bots
-        self._stop   = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True, name="Dashboard")
+        self.bots     = bots
+        self._headless = _os.getenv("HEADLESS", "").lower() in ("1", "true", "yes")
+        self._stop    = threading.Event()
+        self._thread  = threading.Thread(target=self._run, daemon=True, name="Dashboard")
 
     def start(self) -> None:
-        self._thread.start()
+        if not self._headless:
+            self._thread.start()
 
     def stop(self) -> None:
         self._stop.set()

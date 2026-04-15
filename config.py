@@ -18,7 +18,7 @@ def _int(key: str, default: int) -> int:
 PAPER_TRADING = True  # Must always be True; guards against accidental live trading
 
 # ── Capital allocation ────────────────────────────────────────────────────────
-INITIAL_BALANCE = _float("INITIAL_BALANCE", 10_000)  # USDT, split across the three bots
+INITIAL_BALANCE = _float("INITIAL_BALANCE", 1_000)   # USDT, split across the three bots
 
 BOT_ALLOCATIONS = {
     "MACD":     0.33,
@@ -27,7 +27,7 @@ BOT_ALLOCATIONS = {
 }
 
 # ── Universe ──────────────────────────────────────────────────────────────────
-SYMBOLS = ["BTC/USDT", "SOL/USDT"]
+SYMBOLS = ["BTC/USDT", "SOL/USDT", "RENDER/USDT"]
 
 # ── Risk parameters ───────────────────────────────────────────────────────────
 MAX_POSITION_PCT    = _float("MAX_POSITION_PCT",   0.10)  # 10% of bot balance per trade
