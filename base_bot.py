@@ -7,7 +7,6 @@ Handles:
   - Simulated position management (paper trading only)
   - Stop-loss / take-profit checks
   - Commission deduction (both open and close)
-  - Daily trade limit enforcement
   - Thread-safe access to positions and trade history
   - Trade logging (CSV + Python logging with rotation)
   - State persistence (positions + trades survive restarts)
@@ -203,11 +202,10 @@ class BaseBot:
         self.balance: float       = saved_balance if saved_balance is not None else default_balance
         self.start_balance: float = default_balance  # always the configured start, not restored
 
-        # Daily-loss / daily-trade guard
+        # Daily-loss guard
         self._day_start_balance: float = self.balance
         self._current_day: date        = date.today()
         self.paused: bool              = False
-        self._day_trade_count: int     = 0
 
         # Exchange (public, no API keys) — used only for startup warmup
         self.exchange = ccxt.bybit(config.EXCHANGE_OPTS)
@@ -297,7 +295,6 @@ class BaseBot:
     def open_position(self, symbol: str, side: str) -> None:
         """
         Simulate opening a position. Deducts commission from balance.
-        Enforces MAX_DAILY_TRADES limit.
         """
         if not config.PAPER_TRADING:
             raise RuntimeError("Real trading is disabled.")
@@ -307,12 +304,6 @@ class BaseBot:
                 self.log.debug("Already in a position for %s — skipping.", symbol)
                 return
 
-            if self._day_trade_count >= config.MAX_DAILY_TRADES:
-                self.log.info(
-                    "Daily trade limit (%d) reached — skipping %s.", config.MAX_DAILY_TRADES, symbol
-                )
-                return
-
             price    = self.current_price(symbol)
             notional = self.balance * config.MAX_POSITION_PCT
             size     = notional / price
@@ -320,7 +311,6 @@ class BaseBot:
 
             self.balance -= comm
             self.positions[symbol] = _new_position(symbol, side, price, size)
-            self._day_trade_count += 1
 
         self.log.info(
             "OPEN %s %s | price=%.4f | size=%.6f | notional=%.2f | commission=%.4f USDT",
@@ -418,7 +408,6 @@ class BaseBot:
         if today != self._current_day:
             self._current_day       = today
             self._day_start_balance = self.balance
-            self._day_trade_count   = 0
             self.paused             = False
             self.log.info("New trading day — daily counters reset.")
 
