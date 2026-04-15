@@ -5,3 +5,4 @@ rich
 pyarrow
 python-dotenv
 pytest
+pybit
