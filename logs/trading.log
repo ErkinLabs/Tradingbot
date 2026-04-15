@@ -498,3 +498,4 @@
 2026-04-07 17:53:30,449 [MACD] INFO Initialised | balance=3300.00 USDT | symbols=['BTC/USDT', 'SOL/USDT'] | restored=False
 2026-04-07 18:03:00,942 [MACD] INFO Initialised | balance=3300.00 USDT | symbols=['BTC/USDT', 'SOL/USDT'] | restored=False
 2026-04-07 19:00:00,448 [MACD] INFO Initialised | balance=3300.00 USDT | symbols=['BTC/USDT', 'SOL/USDT'] | restored=False
+2026-04-15 21:37:47,761 [MACD] INFO Initialised | balance=3300.00 USDT | symbols=['BTC/USDT', 'SOL/USDT'] | restored=False

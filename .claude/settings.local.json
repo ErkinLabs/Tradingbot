@@ -23,7 +23,9 @@
       "Bash(python audit_macd_exits.py)",
       "Bash(python3 audit_macd_exits.py)",
       "Bash(\"C:\\\\Users\\\\hayre\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe\" audit_macd_exits.py)",
-      "Bash(git -C \"D:/PROJECTS/CLAUDE/CRYPTOBOT/trading-bots\" log --oneline -10)"
+      "Bash(git -C \"D:/PROJECTS/CLAUDE/CRYPTOBOT/trading-bots\" log --oneline -10)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ]
   }
 }

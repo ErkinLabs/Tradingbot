@@ -49,7 +49,21 @@ EXCHANGE_OPTS   = {"defaultType": "spot"}  # Spot market (no leverage)
 COMMISSION_RATE = _float("COMMISSION_RATE", 0.001)  # 0.1% per trade side (Bybit spot taker)
 
 # ── Candle history ────────────────────────────────────────────────────────────
-OHLCV_LIMIT = 200  # number of candles to fetch per symbol
+OHLCV_LIMIT  = 200   # candles fetched by ccxt for one-off REST calls
+WARMUP_BARS  = 250   # candles seeded into each KlineBuffer at startup
+
+# ── pybit WebSocket — ccxt timeframe → pybit kline interval ──────────────────
+PYBIT_INTERVALS: dict = {
+    "1m":  1,
+    "3m":  3,
+    "5m":  5,
+    "15m": 15,
+    "30m": 30,
+    "1h":  60,
+    "2h":  120,
+    "4h":  240,
+    "1d":  "D",
+}
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_DIR        = "logs"

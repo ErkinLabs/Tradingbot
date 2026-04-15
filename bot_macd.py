@@ -165,7 +165,7 @@ class MACDBot(BaseBot):
     # ── Per-symbol live logic ─────────────────────────────────────────────────
 
     def _process_symbol(self, symbol: str) -> None:
-        df = self.fetch_ohlcv(symbol, self.timeframe)
+        df = self._buffers[symbol].get_df()
         if len(df) < _MIN_BARS:
             return
 

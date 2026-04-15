@@ -29,6 +29,7 @@ import ccxt
 import pandas as pd
 
 import config
+from kline_buffer import KlineBuffer
 
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -175,15 +176,40 @@ class BaseBot:
         self.paused: bool              = False
         self._day_trade_count: int     = 0
 
-        # Exchange (public, no API keys)
+        # Exchange (public, no API keys) — used only for startup warmup
         self.exchange = ccxt.bybit(config.EXCHANGE_OPTS)
         self.exchange.load_markets()
+
+        # WebSocket kline buffers — keyed by symbol, attached by main.py at startup
+        self._buffers: dict[str, KlineBuffer] = {}
 
         restored = len(self.positions) > 0 or len(self.closed_trades) > 0
         self.log.info(
             "Initialised | balance=%.2f USDT | symbols=%s | restored=%s",
             self.balance, config.SYMBOLS, restored,
         )
+
+    # ── Buffer attachment (called by main.py at startup) ─────────────────────
+
+    def attach_buffer(self, symbol: str, buffer: KlineBuffer) -> None:
+        """Attach a pre-seeded KlineBuffer for a symbol. Called before WebSocket starts."""
+        self._buffers[symbol] = buffer
+
+    # ── WebSocket candle-close handler ────────────────────────────────────────
+
+    def on_candle_close(self, symbol: str) -> None:
+        """
+        Called by KlineStreamManager when a candle is confirmed (closed).
+        Replaces the timer-based run_once() loop for live trading.
+        Subclasses must implement _process_symbol() to consume the buffer.
+        """
+        if self.check_daily_loss():
+            return
+        self.check_stop_loss_take_profit()
+        try:
+            self._process_symbol(symbol)
+        except Exception as exc:
+            self.log.error("Error processing %s: %s", symbol, exc, exc_info=True)
 
     # ── Market data (with retry) ──────────────────────────────────────────────
 
@@ -219,6 +245,14 @@ class BaseBot:
                 raise
 
     def current_price(self, symbol: str) -> float:
+        """
+        Return the current price for a symbol.
+        Hot path (WebSocket): reads last confirmed close from the KlineBuffer.
+        Fallback (warmup / buffer not yet attached): falls back to REST ticker.
+        """
+        buf = self._buffers.get(symbol)
+        if buf is not None and buf.last_price is not None:
+            return buf.last_price
         ticker = self.fetch_ticker(symbol)
         return float(ticker["last"])
 
