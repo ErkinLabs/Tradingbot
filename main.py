@@ -8,7 +8,7 @@ Features
   - Per-bot daily-loss guard (pauses bot if limit hit)
   - Rich terminal dashboard (auto-refreshes every 10 s)
   - Graceful shutdown on Ctrl+C with final stats summary
-  - Optional web dashboard: pass --with-dashboard to enable (port 8080)
+  - Optional web dashboard: pass --with-dashboard to enable (port 7000)
 """
 
 import argparse
@@ -110,7 +110,7 @@ def _print_final_stats(bots) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Paper trading bot system")
     parser.add_argument("--with-dashboard", action="store_true",
-                        help="Start the web dashboard on port 8080")
+                        help="Start the web dashboard on port 7000")
     args = parser.parse_args()
 
     assert config.PAPER_TRADING, "Set PAPER_TRADING=True before running."
@@ -161,9 +161,9 @@ def main() -> None:
     if args.with_dashboard:
         from dashboard.server import run as run_web, register_bots
         register_bots(bots)
-        web_thread = threading.Thread(target=run_web, kwargs={"port": 8080}, daemon=True)
+        web_thread = threading.Thread(target=run_web, kwargs={"port": 7000}, daemon=True)
         web_thread.start()
-        console.print("[bold cyan]Web dashboard running at http://localhost:8080[/bold cyan]")
+        console.print("[bold cyan]Web dashboard running at http://localhost:7000[/bold cyan]")
 
     console.print("[bold cyan]All bots running. Press Ctrl+C to stop.[/bold cyan]\n")
 
