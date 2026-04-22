@@ -5,7 +5,10 @@ Timeframe  : 5-minute candles
 Signal     : MACD histogram zero-cross
               prev_hist < 0 AND curr_hist > 0  ->  BUY  (long)
 Exit (patient):
-  Strong reversal — MACD line crosses below zero AND histogram negative
+  1. Trailing stop  : price falls > 1.2% from peak-since-entry  → close
+  2. 2-bar confirm  : histogram negative for 2 consecutive bars
+                      AND MACD line < 0                          → close
+  3. Min hold       : neither exit fires before 3 bars have passed
 Filters:
   1. EMA200 trend: long only above EMA200
   2. ADX >= 20: confirmed trending market (filters choppy/sideways regimes)
@@ -17,7 +20,8 @@ Target win rate: ~50 %
 Avg hold time : ~30-60 minutes
 """
 
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Optional, Union
 
 import pandas as pd
 import pandas_ta as ta
@@ -25,7 +29,9 @@ import pandas_ta as ta
 import config
 from base_bot import BaseBot
 
-_MIN_BARS = 210  # raised for EMA200 warmup
+_MIN_BARS      = 210    # raised for EMA200 warmup
+_MIN_HOLD_BARS = 3      # don't exit before 3 bars (15 min on 5m TF)
+_TRAILING_PCT  = 0.012  # 1.2% drawdown from peak triggers trailing close
 
 # Precomputed column names (added by precompute_indicators)
 _C_HIST       = "_macd_hist"
@@ -36,6 +42,9 @@ _C_VOL_SMA    = "_vol_sma20"
 _C_RSI        = "_rsi14"
 _C_ADX        = "_adx14"
 _C_MACD_LINE  = "_macd_line"
+
+# Timeframe → seconds (for bars_held computation in live trading)
+_TF_SECS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600}
 
 
 class MACDBot(BaseBot):
@@ -86,7 +95,9 @@ class MACDBot(BaseBot):
     # ── Signal generation (shared by live trading and backtesting) ────────────
 
     def generate_signal(
-        self, df: pd.DataFrame, position: Optional[str] = None
+        self,
+        df: pd.DataFrame,
+        position: Union[None, str, dict] = None,
     ) -> Optional[str]:
         """
         Parameters
@@ -94,7 +105,10 @@ class MACDBot(BaseBot):
         df       : OHLCV DataFrame. If precompute_indicators() was called on the
                    full df beforehand, indicator columns are used directly (fast path).
                    Otherwise they are computed from scratch (live trading path).
-        position : current position side - "long" or None (flat)
+        position : None (flat), "long" (legacy string), or a dict:
+                     {"side": "long", "bars_held": int, "peak_price": float}
+                   BacktestEngine and _process_symbol pass the dict form;
+                   old callers passing a bare string continue to work.
 
         Returns
         -------
@@ -104,6 +118,16 @@ class MACDBot(BaseBot):
         """
         if len(df) < _MIN_BARS:
             return None
+
+        # ── Unpack position context ───────────────────────────────────────────
+        if isinstance(position, dict):
+            pos_side   = position.get("side")
+            bars_held  = int(position.get("bars_held", 0))
+            peak_price = float(position.get("peak_price") or 0.0)
+        else:
+            pos_side   = position   # None or "long"
+            bars_held  = 0
+            peak_price = 0.0
 
         # ── Fast path: precomputed columns present ────────────────────────────
         if _C_HIST in df.columns:
@@ -148,10 +172,20 @@ class MACDBot(BaseBot):
         vol_spike    = latest_vol > vol_sma * 2.0
         hist_growing = abs(curr_hist) > abs(prev_hist)
 
-        if position == "long":
-            # Patient exit: wait for MACD line itself to go negative (12/26 EMA cross reversed)
-            # AND histogram negative — requires a genuine sustained trend reversal.
-            if macd_line < 0 and curr_hist < 0:
+        if pos_side == "long":
+            # Minimum hold: suppress all exits for the first N bars
+            if bars_held < _MIN_HOLD_BARS:
+                return None
+
+            # Trailing stop: close if price pulled back > 1.2% from the highest
+            # close seen since entry (peak_price is maintained by the caller)
+            if peak_price > 0 and price < peak_price * (1 - _TRAILING_PCT):
+                return "close"
+
+            # 2-bar confirmation exit: histogram must be negative for two
+            # consecutive bars AND MACD line must be below zero.
+            # Single-bar dips are ignored to avoid premature exits.
+            if macd_line < 0 and curr_hist < 0 and prev_hist < 0:
                 return "close"
 
         else:  # flat — zero-cross entry
@@ -172,10 +206,31 @@ class MACDBot(BaseBot):
         if len(df) < _MIN_BARS:
             return
 
-        position = self.positions[symbol]["side"] if symbol in self.positions else None
-        signal   = self.generate_signal(df, position)
+        pos_context: Optional[dict] = None
 
-        if signal == "buy" and position is None:
+        if symbol in self.positions:
+            pos   = self.positions[symbol]
+            price = float(df["close"].iloc[-1])
+
+            # Keep a running peak price in the live position dict
+            if "peak_price" not in pos:
+                pos["peak_price"] = pos["entry_price"]
+            pos["peak_price"] = max(pos["peak_price"], price)
+
+            # Derive bars_held from elapsed wall-clock time and the TF duration
+            tf_secs   = _TF_SECS.get(self.timeframe, 300)
+            elapsed   = (datetime.now(timezone.utc) - pos["opened_at"]).total_seconds()
+            bars_held = max(0, int(elapsed / tf_secs))
+
+            pos_context = {
+                "side":       pos["side"],
+                "bars_held":  bars_held,
+                "peak_price": pos["peak_price"],
+            }
+
+        signal = self.generate_signal(df, pos_context)
+
+        if signal == "buy" and pos_context is None:
             self.open_position(symbol, "long")
-        elif signal == "close" and position is not None:
+        elif signal == "close" and pos_context is not None:
             self.close_position(symbol, reason="macd_signal_reverse")

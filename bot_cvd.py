@@ -8,7 +8,10 @@ CVD        : cumulative sum of signed volume (bar-direction approximation)
 
 Signal
   LONG  : price falling (-0.8 % over 10 bars) BUT CVD rising  → hidden buying
-  CLOSE : CVD turns negative → divergence resolved, exit
+  CLOSE :
+    1. Trailing stop  : price falls > 1.2% from peak-since-entry  → close
+    2. 2-bar confirm  : CVD change ≤ 0 for two consecutive bars   → close
+    3. Min hold       : neither exit fires before 3 bars have passed
 
 Filters:
   1. Min price change: 0.8% (filter noise and weak moves)
@@ -28,7 +31,8 @@ Target win rate : ~58 %
 Avg hold time   : ~47 minutes
 """
 
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Optional, Union
 
 import pandas as pd
 import pandas_ta as ta
@@ -36,14 +40,19 @@ import pandas_ta as ta
 import config
 from base_bot import BaseBot
 
-_LOOKBACK = 10
+_LOOKBACK         = 10
 _MIN_PRICE_CHANGE = 0.008  # 0.8% — best balance of signal quality vs frequency
-_MIN_BARS = _LOOKBACK + 205  # raised for EMA200 + confirmation bar
+_MIN_BARS         = _LOOKBACK + 205  # raised for EMA200 + confirmation bar
+_MIN_HOLD_BARS    = 3       # don't exit before 3 bars (45 min on 15m TF)
+_TRAILING_PCT     = 0.012   # 1.2% drawdown from peak triggers trailing close
 
 # Precomputed column names
 _C_CVD      = "_cvd"
 _C_EMA200   = "_ema200"
 _C_AVG_VOL  = "_avg_vol96"
+
+# Timeframe → seconds (for bars_held computation in live trading)
+_TF_SECS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600}
 
 
 def _calc_cvd(df: pd.DataFrame) -> pd.Series:
@@ -92,23 +101,37 @@ class CVDBot(BaseBot):
     # ── Signal generation (shared by live trading and backtesting) ────────────
 
     def generate_signal(
-        self, df: pd.DataFrame, position: Optional[str] = None
+        self,
+        df: pd.DataFrame,
+        position: Union[None, str, dict] = None,
     ) -> Optional[str]:
         """
         Parameters
         ----------
         df       : OHLCV DataFrame
-        position : "long", "short", or None
+        position : None (flat), "long" (legacy string), or a dict:
+                     {"side": "long", "bars_held": int, "peak_price": float}
+                   BacktestEngine and _process_symbol pass the dict form;
+                   old callers passing a bare string continue to work.
 
         Returns
         -------
-        "buy"   → bullish divergence detected (or close short)
-        "sell"  → bearish divergence detected (or close long)
-        "close" → divergence resolved, exit position
+        "buy"   → bullish divergence detected
+        "close" → divergence resolved or trailing stop hit, exit position
         None    → no actionable signal
         """
         if len(df) < _MIN_BARS:
             return None
+
+        # ── Unpack position context ───────────────────────────────────────────
+        if isinstance(position, dict):
+            pos_side   = position.get("side")
+            bars_held  = int(position.get("bars_held", 0))
+            peak_price = float(position.get("peak_price") or 0.0)
+        else:
+            pos_side   = position   # None or "long"
+            bars_held  = 0
+            peak_price = 0.0
 
         # ── Fast path (precomputed columns present) ───────────────────────────
         if _C_CVD in df.columns:
@@ -135,7 +158,7 @@ class CVDBot(BaseBot):
         cvd_min_move = avg_vol * 0.01
         cvd_sig      = abs(cvd_change) > cvd_min_move
 
-        # Confirmation: check previous bar had the same divergence
+        # Previous bar's divergence metrics (used for entry confirmation AND exit confirmation)
         price_prev  = float(df["close"].iloc[-2])
         price_prev2 = float(df["close"].iloc[-_LOOKBACK - 2])
         cvd_prev    = float(cvd.iloc[-2])
@@ -143,9 +166,19 @@ class CVDBot(BaseBot):
         prev_price_change = (price_prev - price_prev2) / price_prev2 if price_prev2 != 0 else 0.0
         prev_cvd_change   = cvd_prev - cvd_prev2
 
-        if position == "long":
-            # Exit when buying pressure disappears
-            if cvd_change <= 0:
+        if pos_side == "long":
+            # Minimum hold: suppress all exits for the first N bars
+            if bars_held < _MIN_HOLD_BARS:
+                return None
+
+            # Trailing stop: close if price pulled back > 1.2% from the highest
+            # close seen since entry (peak_price is maintained by the caller)
+            if peak_price > 0 and price_now < peak_price * (1 - _TRAILING_PCT):
+                return "close"
+
+            # 2-bar confirmation exit: CVD change must be ≤ 0 for two consecutive
+            # bars before exiting. Single-bar CVD dips are ignored.
+            if cvd_change <= 0 and prev_cvd_change <= 0:
                 return "close"
 
         else:  # flat — all filters must pass
@@ -167,10 +200,31 @@ class CVDBot(BaseBot):
         if len(df) < _MIN_BARS:
             return
 
-        position = self.positions[symbol]["side"] if symbol in self.positions else None
-        signal   = self.generate_signal(df, position)
+        pos_context: Optional[dict] = None
 
-        if signal == "buy" and position is None:
+        if symbol in self.positions:
+            pos   = self.positions[symbol]
+            price = float(df["close"].iloc[-1])
+
+            # Keep a running peak price in the live position dict
+            if "peak_price" not in pos:
+                pos["peak_price"] = pos["entry_price"]
+            pos["peak_price"] = max(pos["peak_price"], price)
+
+            # Derive bars_held from elapsed wall-clock time and the TF duration
+            tf_secs   = _TF_SECS.get(self.timeframe, 900)
+            elapsed   = (datetime.now(timezone.utc) - pos["opened_at"]).total_seconds()
+            bars_held = max(0, int(elapsed / tf_secs))
+
+            pos_context = {
+                "side":       pos["side"],
+                "bars_held":  bars_held,
+                "peak_price": pos["peak_price"],
+            }
+
+        signal = self.generate_signal(df, pos_context)
+
+        if signal == "buy" and pos_context is None:
             self.open_position(symbol, "long")
-        elif signal == "close" and position is not None:
+        elif signal == "close" and pos_context is not None:
             self.close_position(symbol, reason="cvd_divergence_resolved")
