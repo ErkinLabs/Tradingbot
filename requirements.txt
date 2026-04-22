@@ -6,3 +6,6 @@ pyarrow
 python-dotenv
 pytest
 pybit
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+websockets>=12.0

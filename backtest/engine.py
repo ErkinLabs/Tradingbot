@@ -249,7 +249,6 @@ class BacktestEngine:
             # ── Generate signal (only when not paused or pending) ─────────────
             if (
                 not day_paused
-                and day_trades < config.MAX_DAILY_TRADES
                 and pending_open is None
                 and not pending_close
                 # need at least one more bar to fill the order

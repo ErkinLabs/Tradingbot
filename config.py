@@ -34,7 +34,6 @@ MAX_POSITION_PCT    = _float("MAX_POSITION_PCT",   0.10)  # 10% of bot balance p
 STOP_LOSS_PCT       = _float("STOP_LOSS_PCT",      0.015) # 1.5%
 TAKE_PROFIT_PCT     = _float("TAKE_PROFIT_PCT",    0.030) # 3.0%
 MAX_DAILY_LOSS_PCT  = _float("MAX_DAILY_LOSS_PCT", 0.05)  # 5% — bot pauses if breached
-MAX_DAILY_TRADES    = _int("MAX_DAILY_TRADES",     5)     # max new entries per day per bot
 
 # ── Timeframes ────────────────────────────────────────────────────────────────
 TIMEFRAMES = {

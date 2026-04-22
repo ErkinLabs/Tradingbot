@@ -132,26 +132,6 @@ class TestDailyLossGuard(unittest.TestCase):
         self.assertEqual(self.bot._day_trade_count, 0)
 
 
-# ── Daily trade limit ─────────────────────────────────────────────────────────
-
-class TestDailyTradeLimit(unittest.TestCase):
-
-    def setUp(self):
-        self.bot = _make_bot()
-        self.bot.exchange.fetch_ticker = MagicMock(return_value={"last": 40_000.0})
-
-    def test_cannot_exceed_max_daily_trades(self):
-        limit = config.MAX_DAILY_TRADES
-        symbols = [f"COIN{i}/USDT" for i in range(limit + 2)]
-        for sym in symbols:
-            self.bot.open_position(sym, "long")
-        self.assertLessEqual(len(self.bot.positions), limit)
-
-    def test_counter_increments_on_open(self):
-        self.bot.open_position("BTC/USDT", "long")
-        self.assertEqual(self.bot._day_trade_count, 1)
-
-
 # ── SL / TP ───────────────────────────────────────────────────────────────────
 
 class TestStopLossTakeProfit(unittest.TestCase):

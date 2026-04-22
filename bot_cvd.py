@@ -14,7 +14,7 @@ Filters:
   1. Min price change: 0.8% (filter noise and weak moves)
   2. CVD magnitude: CVD change must exceed 1% of average daily volume
   3. Confirmation: divergence must persist for 2 consecutive bars
-  4. EMA50 trend: long only above EMA50
+  4. EMA200 trend: long only above EMA200
 
 Known gap — live vs backtest CVD:
   Live trading should ideally use tick-level CVD (delta = buy_vol − sell_vol per trade
@@ -38,12 +38,12 @@ from base_bot import BaseBot
 
 _LOOKBACK = 10
 _MIN_PRICE_CHANGE = 0.008  # 0.8% — best balance of signal quality vs frequency
-_MIN_BARS = _LOOKBACK + 55  # raised for EMA50 + confirmation bar
+_MIN_BARS = _LOOKBACK + 205  # raised for EMA200 + confirmation bar
 
 # Precomputed column names
-_C_CVD     = "_cvd"
-_C_EMA50   = "_ema50"
-_C_AVG_VOL = "_avg_vol96"
+_C_CVD      = "_cvd"
+_C_EMA200   = "_ema200"
+_C_AVG_VOL  = "_avg_vol96"
 
 
 def _calc_cvd(df: pd.DataFrame) -> pd.Series:
@@ -71,7 +71,7 @@ class CVDBot(BaseBot):
     def precompute_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         df[_C_CVD]     = _calc_cvd(df)
-        df[_C_EMA50]   = ta.ema(df["close"], length=50)
+        df[_C_EMA200]  = ta.ema(df["close"], length=200)
         df[_C_AVG_VOL] = df["volume"].rolling(96).mean()
         return df
 
@@ -112,16 +112,16 @@ class CVDBot(BaseBot):
 
         # ── Fast path (precomputed columns present) ───────────────────────────
         if _C_CVD in df.columns:
-            cvd       = df[_C_CVD]
-            ema50_val = float(df[_C_EMA50].iloc[-1]) if not pd.isna(df[_C_EMA50].iloc[-1]) else None
-            avg_vol   = float(df[_C_AVG_VOL].iloc[-1])
+            cvd        = df[_C_CVD]
+            ema200_val = float(df[_C_EMA200].iloc[-1]) if not pd.isna(df[_C_EMA200].iloc[-1]) else None
+            avg_vol    = float(df[_C_AVG_VOL].iloc[-1])
 
         # ── Slow path (live trading — compute from scratch) ───────────────────
         else:
-            cvd       = _calc_cvd(df)
-            ema50     = ta.ema(df["close"], length=50)
-            ema50_val = float(ema50.iloc[-1]) if ema50 is not None else None
-            avg_vol   = float(df["volume"].rolling(96).mean().iloc[-1])
+            cvd        = _calc_cvd(df)
+            ema200     = ta.ema(df["close"], length=200)
+            ema200_val = float(ema200.iloc[-1]) if ema200 is not None else None
+            avg_vol    = float(df["volume"].rolling(96).mean().iloc[-1])
 
         price_now  = float(df["close"].iloc[-1])
         price_then = float(df["close"].iloc[-_LOOKBACK - 1])
@@ -149,10 +149,10 @@ class CVDBot(BaseBot):
                 return "close"
 
         else:  # flat — all filters must pass
-            if cvd_sig and ema50_val is not None:
+            if cvd_sig and ema200_val is not None:
                 bullish_now  = price_change < -_MIN_PRICE_CHANGE and cvd_change > 0
                 bullish_prev = prev_price_change < -_MIN_PRICE_CHANGE and prev_cvd_change > 0
-                if bullish_now and bullish_prev and price_now > ema50_val:
+                if bullish_now and bullish_prev and price_now > ema200_val:
                     return "buy"
 
         return None
