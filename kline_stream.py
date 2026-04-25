@@ -7,6 +7,7 @@ session goes silent for longer than _MAX_SILENCE_SECS (e.g. after a
 ping/pong timeout that pybit did not self-heal).
 """
 
+import json
 import logging
 import threading
 import time
@@ -34,6 +35,9 @@ PYBIT_INTERVALS: dict[str, int | str] = {
 # Reconnect if no data message received for this many seconds
 _MAX_SILENCE_SECS = 180
 
+# Log the first N raw messages at INFO to surface format issues immediately
+_RAW_LOG_COUNT = 10
+
 
 def _bybit_symbol(ccxt_symbol: str) -> str:
     """Convert ccxt symbol to Bybit format: 'BTC/USDT' → 'BTCUSDT'."""
@@ -60,6 +64,7 @@ class KlineStreamManager:
         self._lock       = threading.Lock()
         self._stop_event = threading.Event()
         self._watchdog:  Optional[threading.Thread]  = None
+        self._raw_logged: int = 0  # how many raw messages logged so far (all TFs combined)
 
     # ── Registration ──────────────────────────────────────────────────────────
 
@@ -167,8 +172,28 @@ class KlineStreamManager:
 
     def _on_message(self, msg: dict, symbol: str, tf: str) -> None:
         """Route a pybit kline tick to the matching buffer; fire callbacks on close."""
+
+        # ── Raw message logging (first _RAW_LOG_COUNT messages, all formats) ──
+        with self._lock:
+            raw_idx = self._raw_logged
+            if raw_idx < _RAW_LOG_COUNT:
+                self._raw_logged += 1
+        if raw_idx < _RAW_LOG_COUNT:
+            try:
+                raw_str = json.dumps(msg)[:600]
+            except Exception:
+                raw_str = str(msg)[:600]
+            log.info("RAW[%d] %s tf=%s | %s", raw_idx + 1, symbol, tf, raw_str)
+
+        # ── Non-data messages (subscription-ack, heartbeat, etc.) ─────────────
         if "data" not in msg:
-            return  # heartbeat / subscription-ack
+            log.debug(
+                "Non-data msg %s tf=%s | op=%s success=%s ret_msg=%s keys=%s",
+                symbol, tf,
+                msg.get("op"), msg.get("success"), msg.get("ret_msg"),
+                list(msg.keys()),
+            )
+            return
 
         with self._lock:
             self._last_msg[tf] = time.monotonic()
@@ -180,11 +205,29 @@ class KlineStreamManager:
             return
 
         for candle in msg["data"]:
-            confirmed = buf.update(candle)
+            # Log field names once per session to verify the confirm field name
+            if raw_idx < _RAW_LOG_COUNT:
+                log.info(
+                    "CANDLE FIELDS %s tf=%s | keys=%s | confirm=%s",
+                    symbol, tf, list(candle.keys()), candle.get("confirm"),
+                )
+
+            # Handle both "confirm" (Bybit V5 standard) and legacy "confirmed"
+            confirm_raw = candle.get("confirm", candle.get("confirmed", False))
+            confirmed   = bool(confirm_raw)
+
+            log.debug(
+                "Tick %s tf=%s | close=%s confirm=%s(%s)",
+                symbol, tf, candle.get("close"), confirm_raw, confirmed,
+            )
+
+            buf.update_confirm_aware(candle, confirmed)
+
             if confirmed:
-                log.debug(
-                    "Candle closed %s %s close=%.4f",
-                    symbol, tf, float(candle.get("close", 0)),
+                log.info(
+                    "Candle CLOSED %s tf=%s close=%s — firing %d callback(s)",
+                    symbol, tf, candle.get("close"),
+                    len(self._callbacks.get(key, [])),
                 )
                 for cb in self._callbacks.get(key, []):
                     try:
