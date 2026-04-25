@@ -1,10 +1,10 @@
 """
-KlineStreamManager — raw WebSocket kline subscriptions for all bots.
+KlineStreamManager — kline subscriptions via websocket.create_connection.
 
-Connects directly to wss://stream.bybit.com/v5/public/spot using
-websocket-client and subscribes to kline topics for all registered
-(symbol, timeframe) pairs. A background watchdog reconnects if the
-session goes silent for longer than _MAX_SILENCE_SECS.
+A single background thread calls ws.recv() in a tight loop. Any exception
+triggers a 5-second back-off and a full reconnect. A watchdog thread
+force-closes the socket if no kline data arrives for _MAX_SILENCE_SECS,
+which causes recv() to raise and the recv loop to reconnect.
 """
 
 import json
@@ -19,9 +19,13 @@ from kline_buffer import KlineBuffer
 
 log = logging.getLogger("KlineStream")
 
-_WS_URL = "wss://stream.bybit.com/v5/public/spot"
+_WS_URL           = "wss://stream.bybit.com/v5/public/spot"
+_RECV_TIMEOUT     = 30    # recv() unblocks at most every N seconds (for pings)
+_PING_INTERVAL    = 20    # send {"op":"ping"} every N seconds
+_MAX_SILENCE_SECS = 180   # watchdog force-reconnect threshold
+_RAW_LOG_COUNT    = 5     # log this many raw messages at DEBUG on startup
+_RECONNECT_DELAY  = 5     # seconds to wait before reconnecting after error
 
-# ccxt timeframe string → Bybit V5 kline interval string
 TF_TO_INTERVAL: dict[str, str] = {
     "1m":  "1",
     "3m":  "3",
@@ -33,10 +37,6 @@ TF_TO_INTERVAL: dict[str, str] = {
     "4h":  "240",
     "1d":  "D",
 }
-
-_MAX_SILENCE_SECS  = 180
-_RAW_LOG_COUNT     = 5
-_PING_INTERVAL_SECS = 20
 
 
 def _bybit_symbol(ccxt_symbol: str) -> str:
@@ -60,10 +60,9 @@ class KlineStreamManager:
         self._callbacks:    dict[tuple, list[Callable]] = {}
         self._topic_to_key: dict[str, tuple]            = {}  # "kline.5.BTCUSDT" → (ccxt_sym, tf)
 
-        self._ws:           Optional[websocket.WebSocketApp] = None
-        self._ws_thread:    Optional[threading.Thread]       = None
-        self._watchdog:     Optional[threading.Thread]       = None
-        self._ping_thread:  Optional[threading.Thread]       = None
+        self._ws:           Optional[websocket.WebSocket] = None  # current live socket
+        self._recv_thread:  Optional[threading.Thread]    = None
+        self._watchdog:     Optional[threading.Thread]    = None
 
         self._last_msg:     float = 0.0   # monotonic time of last kline data message
         self._lock          = threading.Lock()
@@ -87,7 +86,7 @@ class KlineStreamManager:
 
         interval = TF_TO_INTERVAL.get(timeframe)
         if interval is None:
-            log.error("No interval mapping for timeframe '%s' — skipping.", timeframe)
+            log.error("No interval mapping for '%s' — skipping.", timeframe)
             return
         topic = f"kline.{interval}.{_bybit_symbol(symbol)}"
         self._topic_to_key[topic] = key
@@ -95,20 +94,18 @@ class KlineStreamManager:
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def start(self) -> None:
-        self._open_connection()
+        self._recv_thread = threading.Thread(
+            target=self._recv_loop, name="ws-recv", daemon=True
+        )
+        self._recv_thread.start()
 
         self._watchdog = threading.Thread(
             target=self._watchdog_loop, name="ws-watchdog", daemon=True
         )
         self._watchdog.start()
 
-        self._ping_thread = threading.Thread(
-            target=self._ping_loop, name="ws-ping", daemon=True
-        )
-        self._ping_thread.start()
-
         log.info(
-            "KlineStreamManager started — %d topic(s), reconnect threshold %ds.",
+            "KlineStreamManager started — %d topic(s), silence threshold %ds.",
             len(self._topic_to_key), _MAX_SILENCE_SECS,
         )
 
@@ -119,107 +116,113 @@ class KlineStreamManager:
         if ws is not None:
             try:
                 ws.close()
-            except Exception as exc:
-                log.warning("Error closing WebSocket: %s", exc)
-        if self._ws_thread and self._ws_thread.is_alive():
-            self._ws_thread.join(timeout=5)
-        log.info("KlineStreamManager stopped.")
-
-    # ── Connection management ─────────────────────────────────────────────────
-
-    def _open_connection(self) -> None:
-        args         = list(self._topic_to_key.keys())
-        sub_msg      = json.dumps({"op": "subscribe", "args": args})
-
-        def on_open(ws: websocket.WebSocketApp) -> None:
-            log.info("WebSocket connected — subscribing to %d topic(s): %s", len(args), args)
-            ws.send(sub_msg)
-            with self._lock:
-                self._last_msg = time.monotonic()
-
-        def on_message(ws: websocket.WebSocketApp, raw: str) -> None:
-            try:
-                self._on_message(json.loads(raw))
-            except Exception as exc:
-                log.error("Message parse error: %s | raw=%s", exc, raw[:200])
-
-        def on_error(ws: websocket.WebSocketApp, error: Exception) -> None:
-            log.error("WebSocket error: %s", error)
-
-        def on_close(
-            ws: websocket.WebSocketApp,
-            code: Optional[int],
-            msg:  Optional[str],
-        ) -> None:
-            log.warning("WebSocket closed (code=%s msg=%s).", code, msg)
-
-        ws = websocket.WebSocketApp(
-            _WS_URL,
-            on_open=on_open,
-            on_message=on_message,
-            on_error=on_error,
-            on_close=on_close,
-        )
-        with self._lock:
-            self._ws = ws
-
-        t = threading.Thread(target=ws.run_forever, name="ws-main", daemon=True)
-        t.start()
-        self._ws_thread = t
-
-    def _reconnect(self) -> None:
-        log.warning("Reconnecting WebSocket…")
-
-        with self._lock:
-            old_ws = self._ws
-            self._ws = None
-
-        if old_ws is not None:
-            try:
-                old_ws.close()
             except Exception:
                 pass
+        if self._recv_thread and self._recv_thread.is_alive():
+            self._recv_thread.join(timeout=10)
+        log.info("KlineStreamManager stopped.")
 
-        if self._ws_thread and self._ws_thread.is_alive():
-            self._ws_thread.join(timeout=5)
+    # ── Recv loop (the core) ──────────────────────────────────────────────────
 
-        try:
-            self._open_connection()
-            log.info("WebSocket reconnected successfully.")
-        except Exception as exc:
-            log.error("Reconnect failed: %s", exc)
+    def _recv_loop(self) -> None:
+        """
+        Connect → subscribe → recv forever.
+        Any exception triggers a _RECONNECT_DELAY back-off and full reconnect.
+        """
+        args    = list(self._topic_to_key.keys())
+        sub_msg = json.dumps({"op": "subscribe", "args": args})
+        ping    = json.dumps({"op": "ping"})
 
-    # ── Background threads ────────────────────────────────────────────────────
+        while not self._stop_event.is_set():
+            ws: Optional[websocket.WebSocket] = None
+            try:
+                log.info("Connecting to %s …", _WS_URL)
+                ws = websocket.create_connection(_WS_URL, timeout=_RECV_TIMEOUT)
+
+                with self._lock:
+                    self._ws = ws
+                    self._last_msg = time.monotonic()
+
+                log.info("Connected. Subscribing: %s", args)
+                ws.send(sub_msg)
+
+                last_ping = time.monotonic()
+
+                while not self._stop_event.is_set():
+                    try:
+                        raw = ws.recv()
+                    except websocket.WebSocketTimeoutException:
+                        # Normal — use the timeout to drive periodic pings
+                        now = time.monotonic()
+                        if now - last_ping >= _PING_INTERVAL:
+                            ws.send(ping)
+                            last_ping = now
+                            log.debug("Ping sent.")
+                        continue
+
+                    if not raw:
+                        continue
+
+                    try:
+                        msg = json.loads(raw)
+                    except json.JSONDecodeError as exc:
+                        log.error("JSON parse error: %s | raw=%s", exc, raw[:200])
+                        continue
+
+                    self._on_message(msg)
+
+                    now = time.monotonic()
+                    if now - last_ping >= _PING_INTERVAL:
+                        ws.send(ping)
+                        last_ping = now
+                        log.debug("Ping sent.")
+
+            except Exception as exc:
+                log.error(
+                    "WebSocket error: %s — reconnecting in %ds.",
+                    exc, _RECONNECT_DELAY,
+                )
+            finally:
+                with self._lock:
+                    self._ws = None
+                if ws is not None:
+                    try:
+                        ws.close()
+                    except Exception:
+                        pass
+
+            if not self._stop_event.is_set():
+                self._stop_event.wait(_RECONNECT_DELAY)
+
+    # ── Watchdog ──────────────────────────────────────────────────────────────
 
     def _watchdog_loop(self) -> None:
-        """Wake every 60 s; reconnect if no data message received recently."""
+        """
+        Wake every 60 s. If no kline data for _MAX_SILENCE_SECS, force-close
+        the socket so recv() raises and the recv loop reconnects.
+        """
         while not self._stop_event.wait(60):
             with self._lock:
                 last = self._last_msg
+                ws   = self._ws
             if last == 0.0:
-                continue  # connection not established yet
+                continue  # not yet connected
             silence = time.monotonic() - last
             if silence > _MAX_SILENCE_SECS:
-                log.warning("No data for %.0fs — triggering reconnect.", silence)
-                self._reconnect()
+                log.warning(
+                    "No kline data for %.0fs — force-closing socket to trigger reconnect.",
+                    silence,
+                )
+                if ws is not None:
+                    try:
+                        ws.close()
+                    except Exception:
+                        pass
 
-    def _ping_loop(self) -> None:
-        """Send Bybit ping every 20 s to keep the connection alive."""
-        ping = json.dumps({"op": "ping"})
-        while not self._stop_event.wait(_PING_INTERVAL_SECS):
-            with self._lock:
-                ws = self._ws
-            if ws is not None:
-                try:
-                    ws.send(ping)
-                    log.debug("Ping sent.")
-                except Exception as exc:
-                    log.debug("Ping failed: %s", exc)
-
-    # ── Message routing ───────────────────────────────────────────────────────
+    # ── Message handling ──────────────────────────────────────────────────────
 
     def _on_message(self, msg: dict) -> None:
-        # Log the first N messages at DEBUG to surface format issues
+        # Log first N messages at DEBUG
         with self._lock:
             raw_idx = self._raw_logged
             if raw_idx < _RAW_LOG_COUNT:
@@ -233,10 +236,10 @@ class KlineStreamManager:
 
         topic = msg.get("topic", "")
 
-        # Non-kline messages: ack, pong, heartbeat
+        # Non-kline messages: subscribe-ack, pong, heartbeat
         if not topic.startswith("kline.") or "data" not in msg:
             log.debug(
-                "Non-kline msg: op=%s success=%s ret_msg=%s",
+                "Non-kline: op=%s success=%s ret_msg=%s",
                 msg.get("op"), msg.get("success"), msg.get("ret_msg"),
             )
             return
