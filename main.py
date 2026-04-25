@@ -107,6 +107,18 @@ def _print_final_stats(bots) -> None:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def _heartbeat_loop(bots, stop_event: threading.Event) -> None:
+    """Log a one-line status for every bot every 5 minutes."""
+    while not stop_event.wait(300):
+        for bot in bots:
+            s = bot.get_stats()
+            bot.log.info(
+                "HEARTBEAT | balance=%.2f trades=%d pnl=%.4f paused=%s open=%s",
+                s["balance"], s["trades"], s["total_pnl"], s["paused"],
+                list(bot.positions.keys()) or [],
+            )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Paper trading bot system")
     parser.add_argument("--with-dashboard", action="store_true",
@@ -164,6 +176,12 @@ def main() -> None:
         web_thread = threading.Thread(target=run_web, kwargs={"port": 7000}, daemon=True)
         web_thread.start()
         console.print("[bold cyan]Web dashboard running at http://localhost:7000[/bold cyan]")
+
+    # Start 5-minute heartbeat (logs balance + open positions per bot)
+    hb_thread = threading.Thread(
+        target=_heartbeat_loop, args=(bots, stop_event), daemon=True
+    )
+    hb_thread.start()
 
     console.print("[bold cyan]All bots running. Press Ctrl+C to stop.[/bold cyan]\n")
 

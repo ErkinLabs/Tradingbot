@@ -203,7 +203,9 @@ class MACDBot(BaseBot):
             self.log.debug("Buffer not yet attached for %s — skipping.", symbol)
             return
         df = self._buffers[symbol].get_df()
-        if len(df) < _MIN_BARS:
+        n  = len(df)
+        if n < _MIN_BARS:
+            self.log.debug("MACD %s | bars=%d/%d — warming up", symbol, n, _MIN_BARS)
             return
 
         pos_context: Optional[dict] = None
@@ -229,6 +231,40 @@ class MACDBot(BaseBot):
             }
 
         signal = self.generate_signal(df, pos_context)
+
+        # ── DEBUG: indicator snapshot every candle close ──────────────────────
+        try:
+            _macd     = ta.macd(df["close"])
+            _hcol     = next((c for c in _macd.columns if c.startswith("MACDh")), None)
+            _lcol     = next((c for c in _macd.columns if c.startswith("MACD_")), None)
+            _h0       = float(_macd[_hcol].iloc[-1]) if _hcol else 0.0
+            _h1       = float(_macd[_hcol].iloc[-2]) if _hcol else 0.0
+            _ml       = float(_macd[_lcol].iloc[-1]) if _lcol else 0.0
+            _e200     = float(ta.ema(df["close"], length=200).iloc[-1])
+            _price    = float(df["close"].iloc[-1])
+            _rsi      = float(ta.rsi(df["close"], length=14).iloc[-1])
+            _adx      = float(ta.adx(df["high"], df["low"], df["close"], length=14)["ADX_14"].iloc[-1])
+            _vsm      = float(df["volume"].rolling(20).mean().iloc[-1])
+            _vr       = float(df["volume"].iloc[-1]) / max(_vsm, 1e-9)
+            _why = ""
+            if signal is None and symbol not in self.positions:
+                if not (_h1 < 0 and _h0 > 0):         _why = f"no-zero-cross(hist={_h1:.5f}→{_h0:.5f})"
+                elif _vr <= 2.0:                        _why = f"low-volume(vol×{_vr:.2f}<2.0)"
+                elif not (abs(_h0) > abs(_h1)):         _why = "hist-not-growing"
+                elif _price <= _e200:                   _why = f"below-ema200({_price:.2f}≤{_e200:.2f})"
+                elif not (45 <= _rsi <= 75):            _why = f"rsi={_rsi:.1f}∉[45,75]"
+                elif _adx < 20:                         _why = f"adx={_adx:.1f}<20"
+                elif _ml <= 0:                          _why = f"macd_line={_ml:.5f}≤0"
+            self.log.debug(
+                "MACD %s | hist=%.5f→%.5f line=%.5f price=%.2f ema200=%.2f "
+                "rsi=%.1f adx=%.1f vol×=%.2f pos=%s → %s%s",
+                symbol, _h1, _h0, _ml, _price, _e200, _rsi, _adx, _vr,
+                "long" if symbol in self.positions else "flat",
+                signal or "no_signal",
+                f" ({_why})" if _why else "",
+            )
+        except Exception:
+            pass
 
         if signal == "buy" and pos_context is None:
             self.open_position(symbol, "long")

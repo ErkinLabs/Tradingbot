@@ -197,7 +197,9 @@ class CVDBot(BaseBot):
             self.log.debug("Buffer not yet attached for %s — skipping.", symbol)
             return
         df = self._buffers[symbol].get_df()
-        if len(df) < _MIN_BARS:
+        n  = len(df)
+        if n < _MIN_BARS:
+            self.log.debug("CVD %s | bars=%d/%d — warming up", symbol, n, _MIN_BARS)
             return
 
         pos_context: Optional[dict] = None
@@ -223,6 +225,44 @@ class CVDBot(BaseBot):
             }
 
         signal = self.generate_signal(df, pos_context)
+
+        # ── DEBUG: indicator snapshot every candle close ──────────────────────
+        try:
+            _cvd   = _calc_cvd(df)
+            _e200  = ta.ema(df["close"], length=200)
+            _ema   = float(_e200.iloc[-1]) if _e200 is not None else float("nan")
+            _avol  = float(df["volume"].rolling(96).mean().iloc[-1])
+            _pnow  = float(df["close"].iloc[-1])
+            _pthn  = float(df["close"].iloc[-_LOOKBACK - 1])
+            _cnow  = float(_cvd.iloc[-1])
+            _cthn  = float(_cvd.iloc[-_LOOKBACK - 1])
+            _pchg  = (_pnow - _pthn) / _pthn * 100 if _pthn else 0.0
+            _cchg  = _cnow - _cthn
+            _csig  = abs(_cchg) > _avol * 0.01
+            _pprev = float(df["close"].iloc[-2])
+            _pp2   = float(df["close"].iloc[-_LOOKBACK - 2])
+            _cprev = float(_cvd.iloc[-2])
+            _cp2   = float(_cvd.iloc[-_LOOKBACK - 2])
+            _ppchg = (_pprev - _pp2) / _pp2 * 100 if _pp2 else 0.0
+            _pcchg = _cprev - _cp2
+            _why = ""
+            if signal is None and pos_context is None:
+                if not _csig:                              _why = f"cvd_insig(chg={_cchg:.1f},min={_avol*0.01:.1f})"
+                elif pd.isna(_ema) or _pnow < _ema:        _why = f"below-ema200({_pnow:.2f}<{_ema:.2f})"
+                elif _pchg >= -_MIN_PRICE_CHANGE * 100:    _why = f"price_chg={_pchg:.3f}%>-0.8%"
+                elif _cchg <= 0:                           _why = f"cvd-not-rising({_cchg:.1f})"
+                elif not (_ppchg < -_MIN_PRICE_CHANGE * 100 and _pcchg > 0):
+                                                           _why = "need-2-bar-confirm"
+            self.log.debug(
+                "CVD %s | price_chg=%.3f%% prev_chg=%.3f%% cvd_chg=%.2f "
+                "prev_cvd_chg=%.2f sig=%s ema200=%.2f pos=%s → %s%s",
+                symbol, _pchg, _ppchg, _cchg, _pcchg, _csig, _ema,
+                "long" if pos_context else "flat",
+                signal or "no_signal",
+                f" ({_why})" if _why else "",
+            )
+        except Exception:
+            pass
 
         if signal == "buy" and pos_context is None:
             self.open_position(symbol, "long")
