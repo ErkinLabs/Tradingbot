@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import config
-from universe_scanner import UniverseManager
+from universe_scanner import UniverseManager, _change_pct, _quote_volume
 
 
 def _ticker(symbol, qv, pct=5.0, last=100.0):
@@ -27,6 +27,14 @@ class TestUniverseScanner(unittest.TestCase):
         ] * 30
         bots = bots or []
         return UniverseManager(exchange, lambda: bots)
+
+    def test_quote_volume_from_bybit_info(self):
+        t = {
+            "last": 100.0,
+            "info": {"turnover24h": "8500000", "price24hPcnt": "0.0523"},
+        }
+        self.assertEqual(_quote_volume(t), 8_500_000.0)
+        self.assertAlmostEqual(_change_pct(t), 5.23, places=2)
 
     def test_daily_whitelist_filters_by_volume(self):
         tickers = {

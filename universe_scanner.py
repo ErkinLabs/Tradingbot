@@ -22,6 +22,44 @@ import config
 log = logging.getLogger("UniverseScanner")
 
 
+def _quote_volume(ticker: dict) -> float:
+    """Extract 24h quote volume — ccxt normalizes some fields; Bybit uses info.turnover24h."""
+    for key in ("quoteVolume", "quote_volume"):
+        val = ticker.get(key)
+        if val is not None:
+            return float(val or 0)
+
+    info = ticker.get("info") or {}
+    if isinstance(info, dict):
+        for key in ("turnover24h", "turnover24H", "quoteVolume", "volume24h"):
+            raw = info.get(key)
+            if raw not in (None, ""):
+                try:
+                    return float(raw)
+                except (TypeError, ValueError):
+                    pass
+
+    last = float(ticker.get("last") or ticker.get("close") or 0)
+    base = float(ticker.get("baseVolume") or ticker.get("base_volume") or 0)
+    if last > 0 and base > 0:
+        return base * last
+    return 0.0
+
+
+def _change_pct(ticker: dict) -> float:
+    for key in ("percentage", "change", "change_percent"):
+        val = ticker.get(key)
+        if val is not None:
+            return abs(float(val or 0))
+    info = ticker.get("info") or {}
+    if isinstance(info, dict) and info.get("price24hPcnt") not in (None, ""):
+        try:
+            return abs(float(info["price24hPcnt"]) * 100)
+        except (TypeError, ValueError):
+            pass
+    return 0.0
+
+
 class UniverseManager:
     """Maintains the active trading symbol list with periodic rescans."""
 
@@ -38,6 +76,18 @@ class UniverseManager:
         self._last_daily_scan: float = 0.0
         self._last_4h_scan: float = 0.0
         self._last_scores: dict[str, float] = {}
+        self._scan_status: str = "pending"
+        self._scan_message: str = ""
+
+    @property
+    def scan_status(self) -> str:
+        with self._lock:
+            return self._scan_status
+
+    @property
+    def scan_message(self) -> str:
+        with self._lock:
+            return self._scan_message
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -90,10 +140,19 @@ class UniverseManager:
             self._active = active
             self._last_scores = scores
             self._last_4h_scan = now
+            if len(active) >= config.UNIVERSE_ACTIVE_COUNT:
+                self._scan_status = "ok"
+                self._scan_message = f"{len(active)} coin seçildi"
+            elif active == list(config.FALLBACK_SYMBOLS):
+                self._scan_status = "fallback"
+                self._scan_message = "Bybit taraması başarısız — statik 4 coin"
+            else:
+                self._scan_status = "partial"
+                self._scan_message = f"yalnızca {len(active)} coin skorlandı"
 
         log.info(
-            "Universe updated (%d active, %d pinned): %s",
-            len(active), len(pinned), merged,
+            "Universe updated (%d active, %d pinned, status=%s): %s",
+            len(active), len(pinned), self._scan_status, merged,
         )
         return merged
 
@@ -110,34 +169,44 @@ class UniverseManager:
         return symbols
 
     def _usdt_spot_candidates(self) -> list[dict]:
-        tickers = self.exchange.fetch_tickers()
+        try:
+            tickers = self.exchange.fetch_tickers()
+        except Exception as exc:
+            log.error("fetch_tickers failed: %s", exc, exc_info=True)
+            return []
+
         out: list[dict] = []
 
         for symbol, t in tickers.items():
             if not symbol.endswith("/USDT"):
                 continue
-            if t.get("quoteVolume") is None:
-                continue
-            qv = float(t["quoteVolume"] or 0)
+            qv = _quote_volume(t)
             if qv < config.UNIVERSE_MIN_QUOTE_VOLUME_USDT:
                 continue
             base = symbol.split("/")[0]
             if base in config.UNIVERSE_EXCLUDE_BASES:
                 continue
-            pct = abs(float(t.get("percentage") or 0))
             out.append({
-                "symbol": symbol,
+                "symbol":       symbol,
                 "quote_volume": qv,
-                "change_pct": pct,
-                "last": float(t.get("last") or 0),
+                "change_pct":   _change_pct(t),
+                "last":         float(t.get("last") or 0),
             })
 
         out.sort(key=lambda x: x["quote_volume"], reverse=True)
+        log.info(
+            "Universe candidates: %d USDT pairs above %.0f USDT volume",
+            len(out), config.UNIVERSE_MIN_QUOTE_VOLUME_USDT,
+        )
         return out[: config.UNIVERSE_CANDIDATE_POOL]
 
     def _build_daily_whitelist(self) -> list[str]:
         candidates = self._usdt_spot_candidates()
         if not candidates:
+            log.warning(
+                "Universe daily scan: no candidates — falling back to %s",
+                config.FALLBACK_SYMBOLS,
+            )
             return list(config.FALLBACK_SYMBOLS)
 
         scored = sorted(
@@ -173,19 +242,20 @@ class UniverseManager:
         scan_list = whitelist[: config.UNIVERSE_4H_SCAN_TOP]
 
         for symbol in scan_list:
-            atr_pct = self._atr_pct(symbol, config.UNIVERSE_SCANNER_TF)
-            if atr_pct is None:
-                continue
             try:
                 t = self.exchange.fetch_ticker(symbol)
-                change = abs(float(t.get("percentage") or 0))
-                qv     = float(t.get("quoteVolume") or 0)
-            except Exception:
+                change = _change_pct(t)
+                qv     = _quote_volume(t)
+            except Exception as exc:
+                log.debug("Ticker fetch failed for %s: %s", symbol, exc)
                 continue
+
+            atr_pct = self._atr_pct(symbol, config.UNIVERSE_SCANNER_TF)
+            atr_component = (atr_pct or 0.0) * 100
 
             rel_vol = min(qv / max(config.UNIVERSE_MIN_QUOTE_VOLUME_USDT, 1), 5.0)
             score = (
-                config.UNIVERSE_W_ATR * atr_pct * 100
+                config.UNIVERSE_W_ATR * atr_component
                 + config.UNIVERSE_W_CHANGE * change
                 + config.UNIVERSE_W_VOLUME * rel_vol
             )

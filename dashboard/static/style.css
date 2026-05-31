@@ -234,6 +234,7 @@ html, body {
   color: var(--text-dim);
   line-height: 1.35;
 }
+.uni-meta--warn { color: var(--yellow); }
 
 .universe-list {
   flex: 1;

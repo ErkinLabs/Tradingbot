@@ -747,9 +747,20 @@ function renderUniverseList() {
 
   if (metaEl) {
     if (u.dynamic_enabled) {
-      metaEl.textContent = `${u.active_count} hareketli coin · ${u.pinned_count || 0} açık pozisyon`;
+      const base = `${u.active_count} hareketli coin · ${u.pinned_count || 0} açık pozisyon`;
+      if (u.scan_status === 'fallback') {
+        metaEl.textContent = `⚠ fallback (4 statik) — tarama başarısız`;
+        metaEl.className = 'uni-meta uni-meta--warn';
+      } else if (u.scan_status === 'partial') {
+        metaEl.textContent = `⚠ ${u.scan_message || base}`;
+        metaEl.className = 'uni-meta uni-meta--warn';
+      } else {
+        metaEl.textContent = u.scan_message ? `${base} · ${u.scan_message}` : base;
+        metaEl.className = 'uni-meta';
+      }
     } else {
       metaEl.textContent = 'Statik evren (dinamik tarama kapalı)';
+      metaEl.className = 'uni-meta';
     }
   }
 

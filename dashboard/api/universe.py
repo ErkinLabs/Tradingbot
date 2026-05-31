@@ -115,5 +115,7 @@ async def get_universe():
         "active":          sorted(active_set),
         "pinned":          sorted(pinned),
         "whitelist":       whitelist,
+        "scan_status":     mgr.scan_status if mgr is not None else "static",
+        "scan_message":    mgr.scan_message if mgr is not None else "",
         "symbols":         rows,
     }
