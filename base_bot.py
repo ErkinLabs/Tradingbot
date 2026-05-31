@@ -133,7 +133,13 @@ def _load_state(bot_name: str) -> dict:
         return {}
 
 
-def _save_state(bot_name: str, positions: dict, closed_trades: list, balance: float) -> None:
+def _save_state(
+    bot_name: str,
+    positions: dict,
+    closed_trades: list,
+    balance: float,
+    extra: Optional[dict] = None,
+) -> None:
     """Persist bot state to disk. Called after every open/close."""
     path = _state_path(bot_name)
     state = {
@@ -144,6 +150,8 @@ def _save_state(bot_name: str, positions: dict, closed_trades: list, balance: fl
         },
         "closed_trades": closed_trades,
     }
+    if extra:
+        state.update(extra)
     try:
         with open(path, "w") as f:
             json.dump(state, f, indent=2)
@@ -202,10 +210,9 @@ class BaseBot:
         self.balance: float       = saved_balance if saved_balance is not None else default_balance
         self.start_balance: float = default_balance  # always the configured start, not restored
 
-        # Daily-loss guard
-        self._day_start_balance: float = self.balance
-        self._current_day: date        = date.today()
-        self.paused: bool              = False
+        # Daily-loss guard (UTC day boundaries)
+        self.paused: bool = False
+        self._apply_day_state(raw)
 
         # Exchange (public, no API keys) — used only for startup warmup
         self.exchange = config.make_exchange()
@@ -224,6 +231,43 @@ class BaseBot:
     def attach_buffer(self, symbol: str, buffer: KlineBuffer) -> None:
         """Attach a pre-seeded KlineBuffer for a symbol. Called before WebSocket starts."""
         self._buffers[symbol] = buffer
+
+    @staticmethod
+    def _utc_today() -> date:
+        return datetime.now(timezone.utc).date()
+
+    def _state_extra(self) -> dict:
+        return {
+            "day_start_balance": self._day_start_balance,
+            "day_start_equity":  self._day_start_equity,
+            "current_day":       self._current_day.isoformat(),
+        }
+
+    def _apply_day_state(self, raw: dict) -> None:
+        """Restore or reset UTC daily counters."""
+        today = self._utc_today()
+        saved_day = raw.get("current_day")
+        if saved_day == today.isoformat():
+            self._current_day        = today
+            self._day_start_balance  = float(raw.get("day_start_balance", self.balance))
+            self._day_start_equity   = float(raw.get("day_start_equity", self.balance))
+        else:
+            self._reset_day_counters()
+
+    def _reset_day_counters(self) -> None:
+        self._current_day       = self._utc_today()
+        self._day_start_balance = self.balance
+        self._day_start_equity  = self.balance + self._unrealized_pnl()
+        self.paused             = False
+
+    def _persist_state(self) -> None:
+        _save_state(
+            self.name,
+            self.positions,
+            self.closed_trades,
+            self.balance,
+            self._state_extra(),
+        )
 
     # ── WebSocket candle-close handler ────────────────────────────────────────
 
@@ -324,7 +368,7 @@ class BaseBot:
             f"Size   : {size:.6f}\n"
             f"Notional: {notional:.2f} USDT"
         )
-        _save_state(self.name, self.positions, self.closed_trades, self.balance)
+        self._persist_state()
 
     def close_position(self, symbol: str, reason: str = "signal") -> Optional[float]:
         """
@@ -360,7 +404,7 @@ class BaseBot:
             self.closed_trades.append(trade)
 
         _append_trade_csv(trade)
-        _save_state(self.name, self.positions, self.closed_trades, self.balance)
+        self._persist_state()
 
         self.log.info(
             "CLOSE %s | entry=%.4f exit=%.4f | gross=%.4f comm=%.4f net=%.4f | reason=%s",
@@ -413,18 +457,36 @@ class BaseBot:
             elif high >= tp_price:
                 self.close_position(symbol, reason="take_profit")
 
+    def _unrealized_pnl(self) -> float:
+        """Mark-to-market P&L for all open positions."""
+        total = 0.0
+        with self._positions_lock:
+            items = list(self.positions.items())
+        for symbol, pos in items:
+            price = self.current_price(symbol)
+            total += (price - pos["entry_price"]) * pos["size"]
+        return total
+
+    def _trades_today(self, trades: list) -> list:
+        today = self._utc_today()
+        return [
+            t for t in trades
+            if datetime.fromisoformat(t["timestamp"]).astimezone(timezone.utc).date() == today
+        ]
+
     def check_daily_loss(self) -> bool:
         """
-        Reset daily counters at midnight.
+        Reset daily counters at UTC midnight.
         Pause bot for the day if MAX_DAILY_LOSS_PCT is breached.
         Returns True if bot is (or becomes) paused.
         """
-        today = date.today()
+        today = self._utc_today()
         if today != self._current_day:
-            self._current_day       = today
-            self._day_start_balance = self.balance
-            self.paused             = False
-            self.log.info("New trading day — daily counters reset.")
+            self._reset_day_counters()
+            self.log.info("New trading day (UTC) — daily counters reset.")
+
+        if self._day_start_balance <= 0:
+            return self.paused
 
         daily_loss_pct = (self._day_start_balance - self.balance) / self._day_start_balance
         if daily_loss_pct >= config.MAX_DAILY_LOSS_PCT:
@@ -442,22 +504,38 @@ class BaseBot:
         with self._trades_lock:
             trades = list(self.closed_trades)
 
-        n         = len(trades)
-        wins      = sum(1 for t in trades if t["net_pnl"] > 0)
-        win_rate  = (wins / n * 100) if n else 0.0
-        total_pnl = sum(t["net_pnl"] for t in trades)
-        return_pct = ((self.balance - self.start_balance) / self.start_balance) * 100
-        sharpe     = self._sharpe(trades)
+        n            = len(trades)
+        wins         = sum(1 for t in trades if t["net_pnl"] > 0)
+        win_rate     = (wins / n * 100) if n else 0.0
+        total_pnl    = sum(t["net_pnl"] for t in trades)
+        return_pct   = ((self.balance - self.start_balance) / self.start_balance) * 100
+        sharpe       = self._sharpe(trades)
+        unrealized   = self._unrealized_pnl()
+        equity       = self.balance + unrealized
+        today_trades = self._trades_today(trades)
+        daily_realized = sum(t["net_pnl"] for t in today_trades)
+        daily_pnl    = equity - self._day_start_equity
+        daily_pct    = (daily_pnl / self._day_start_equity * 100) if self._day_start_equity else 0.0
+        balance_chg  = self.balance - self._day_start_balance
 
         return {
-            "bot":        self.name,
-            "trades":     n,
-            "win_rate":   round(win_rate, 2),
-            "total_pnl":  round(total_pnl, 4),
-            "sharpe":     round(sharpe, 3),
-            "balance":    round(self.balance, 2),
-            "return_pct": round(return_pct, 2),
-            "paused":     self.paused,
+            "bot":                self.name,
+            "trades":             n,
+            "trades_today":       len(today_trades),
+            "wins_today":         sum(1 for t in today_trades if t["net_pnl"] > 0),
+            "win_rate":           round(win_rate, 2),
+            "total_pnl":          round(total_pnl, 4),
+            "daily_pnl":          round(daily_pnl, 4),
+            "daily_pnl_pct":      round(daily_pct, 2),
+            "daily_realized_pnl": round(daily_realized, 4),
+            "daily_balance_chg":  round(balance_chg, 4),
+            "unrealized_pnl":     round(unrealized, 4),
+            "equity":             round(equity, 2),
+            "sharpe":             round(sharpe, 3),
+            "balance":            round(self.balance, 2),
+            "start_balance":      round(self.start_balance, 2),
+            "return_pct":         round(return_pct, 2),
+            "paused":             self.paused,
         }
 
     def _sharpe(self, trades: list) -> float:

@@ -127,8 +127,8 @@ class TestDailyLossGuard(unittest.TestCase):
         self.bot.check_daily_loss()
         self.assertTrue(self.bot.paused)
 
-        from datetime import date, timedelta
-        self.bot._current_day = date.today() - timedelta(days=1)
+        from datetime import timedelta
+        self.bot._current_day = self.bot._utc_today() - timedelta(days=1)
         self.bot.check_daily_loss()
         self.assertFalse(self.bot.paused)
         self.assertEqual(self.bot._day_start_balance, self.bot.balance)
@@ -195,6 +195,22 @@ class TestStopLossTakeProfit(unittest.TestCase):
             self.bot.on_candle_close("BTC/USDT")
         mock_proc.assert_not_called()
         self.assertNotIn("BTC/USDT", self.bot.positions)
+
+
+class TestStats(unittest.TestCase):
+
+    def setUp(self):
+        self.bot = _make_bot()
+        self.bot.exchange.fetch_ticker = MagicMock(return_value={"last": 40_000.0})
+
+    def test_get_stats_includes_daily_and_equity(self):
+        self.bot.open_position("BTC/USDT", "long")
+        self.bot.exchange.fetch_ticker = MagicMock(return_value={"last": 41_000.0})
+        s = self.bot.get_stats()
+        self.assertIn("daily_pnl", s)
+        self.assertIn("equity", s)
+        self.assertIn("unrealized_pnl", s)
+        self.assertGreater(s["unrealized_pnl"], 0)
 
 
 # ── Thread safety ─────────────────────────────────────────────────────────────

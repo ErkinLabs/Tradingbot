@@ -40,6 +40,7 @@ const S = {
   candles:   [],
   trades:    [],
   stats:     [],
+  portfolio: null,
   signals:   [],
   livePrice:  null,
   livePrices: {},   // { 'BTC/USDT': 76000, 'SOL/USDT': 86 } — live price per symbol
@@ -751,6 +752,37 @@ async function loadStats() {
   }
 }
 
+async function loadPortfolio() {
+  try {
+    const r = await apiFetch(`${BASE}/api/portfolio`);
+    S.portfolio = await r.json();
+    renderWalletStrip();
+    renderPnLSummary();
+  } catch (err) {
+    console.error('loadPortfolio:', err);
+  }
+}
+
+function renderWalletStrip() {
+  const p = S.portfolio;
+  if (!p) return;
+
+  const eqEl  = document.getElementById('wallet-equity');
+  const dayEl = document.getElementById('wallet-daily');
+  const totEl = document.getElementById('wallet-total-pnl');
+  if (!eqEl) return;
+
+  eqEl.textContent = `${p.total_equity.toFixed(2)} USDT`;
+  eqEl.className   = 'wallet-value';
+
+  const fmtSigned = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
+  dayEl.textContent = `${fmtSigned(p.daily_pnl)} (${fmtSigned(p.daily_pnl_pct)}%)`;
+  dayEl.className   = 'wallet-value ' + (p.daily_pnl >= 0 ? 'pos' : 'neg');
+
+  totEl.textContent = `${fmtSigned(p.total_pnl)} (${fmtSigned(p.total_return_pct)}%)`;
+  totEl.className   = 'wallet-value ' + (p.total_pnl >= 0 ? 'pos' : 'neg');
+}
+
 async function loadSignals() {
   try {
     const sym = encodeURIComponent(S.symbol);
@@ -775,7 +807,7 @@ async function loadTicker() {
 
 async function loadAll() {
   await loadCandles();
-  await Promise.all([loadTrades(), loadStats(), loadSignals(), loadTicker()]);
+  await Promise.all([loadTrades(), loadStats(), loadPortfolio(), loadSignals(), loadTicker()]);
   connectWS();
 }
 
@@ -865,32 +897,33 @@ function renderPnLSummary() {
   const el = document.getElementById('pnl-content');
   if (!el || !S.stats.length) return;
 
-  const today = new Date().toISOString().slice(0, 10);
-  let totalPnl = 0, totalBal = 0;
+  let totalPnl = 0, totalBal = 0, totalDaily = 0, totalUnrl = 0;
 
   let html = `<div class="pnl-table">
-    <div class="pnl-head"><span></span><span>Total</span><span>Today</span><span>Balance</span></div>`;
+    <div class="pnl-head"><span></span><span>Toplam</span><span>Bugün</span><span>Kasa</span><span>Unrlzd</span></div>`;
 
   for (const s of S.stats) {
-    const dayPnl = S.trades
-      .filter(t => t.bot_name === s.bot && (t.timestamp || '').startsWith(today))
-      .reduce((sum, t) => sum + parseFloat(t.net_pnl || 0), 0);
-    totalPnl += s.total_pnl;
-    totalBal += s.balance;
+    const dayPnl = s.daily_pnl ?? 0;
+    totalPnl   += s.total_pnl;
+    totalBal   += s.balance;
+    totalDaily += dayPnl;
+    totalUnrl  += s.unrealized_pnl ?? 0;
     const col = BOT_COLORS[s.bot] || '#fff';
     html += `<div class="pnl-row">
       <span class="pnl-bot-name" style="color:${col}">${s.bot}</span>
       <span class="${s.total_pnl >= 0 ? 'pos' : 'neg'}">${s.total_pnl >= 0 ? '+' : ''}${s.total_pnl.toFixed(2)}</span>
       <span class="${dayPnl >= 0 ? 'pos' : 'neg'}">${dayPnl >= 0 ? '+' : ''}${dayPnl.toFixed(2)}</span>
-      <span class="pnl-bal">${s.balance.toFixed(2)}</span>
+      <span class="pnl-bal">${s.equity?.toFixed(2) ?? s.balance.toFixed(2)}</span>
+      <span class="${(s.unrealized_pnl || 0) >= 0 ? 'pos' : 'neg'}">${(s.unrealized_pnl || 0) >= 0 ? '+' : ''}${(s.unrealized_pnl || 0).toFixed(2)}</span>
     </div>`;
   }
 
   html += `<div class="pnl-total-row">
-    <span>TOTAL</span>
+    <span>TOPLAM</span>
     <span class="${totalPnl >= 0 ? 'pos' : 'neg'}">${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}</span>
-    <span></span>
-    <span class="pnl-bal">${totalBal.toFixed(2)}</span>
+    <span class="${totalDaily >= 0 ? 'pos' : 'neg'}">${totalDaily >= 0 ? '+' : ''}${totalDaily.toFixed(2)}</span>
+    <span class="pnl-bal">${(S.portfolio?.total_equity ?? totalBal).toFixed(2)}</span>
+    <span class="${totalUnrl >= 0 ? 'pos' : 'neg'}">${totalUnrl >= 0 ? '+' : ''}${totalUnrl.toFixed(2)}</span>
   </div></div>`;
 
   el.innerHTML = html;
@@ -920,9 +953,9 @@ function renderOpenPositions() {
   const now = Date.now();
   let html = '';
   for (const p of positions) {
-    const live    = S.livePrices[p.symbol] || p.entry_price;
-    const pnlPct  = (live - p.entry_price) / p.entry_price * 100;
-    const pnlUSDT = (live - p.entry_price) * p.size;
+    const live    = p.current_price || S.livePrices[p.symbol] || p.entry_price;
+    const pnlPct  = p.unrealized_pct ?? ((live - p.entry_price) / p.entry_price * 100);
+    const pnlUSDT = p.unrealized_pnl ?? ((live - p.entry_price) * p.size);
     const col     = BOT_COLORS[p.botName] || '#fff';
     const dur     = p.opened_at ? fmtDur(now - new Date(p.opened_at).getTime()) : '—';
 
@@ -1000,7 +1033,9 @@ function renderStatusBar() {
     html += `<div class="sb-bot">
       <span class="sb-dot ${s.paused ? 'paused' : 'active'}"></span>
       <span class="sb-name" style="color:${col}">${s.bot}</span>
-      <span class="sb-stat">${s.trades} trades</span>
+      <span class="sb-stat">${s.equity?.toFixed(0) ?? s.balance.toFixed(0)} USDT</span>
+      <span class="sb-stat ${(s.daily_pnl || 0) >= 0 ? 'pos' : 'neg'}">bugün ${(s.daily_pnl || 0) >= 0 ? '+' : ''}${(s.daily_pnl || 0).toFixed(2)}</span>
+      <span class="sb-stat">${s.trades}t/${s.trades_today || 0}d</span>
       <span class="sb-stat">win ${s.win_rate.toFixed(0)}%</span>
       <span class="sb-stat">last ${lastT}</span>
       <span class="sb-sig" style="color:${sigColor}">${sigLbl}</span>
@@ -1087,8 +1122,9 @@ async function init() {
   // Initial data load (also calls connectWS internally)
   await loadAll();
 
-  // Periodic refreshes
-  setInterval(loadStats,   30_000);
+  // Periodic refreshes — wallet/stats every 5s for live equity
+  setInterval(loadPortfolio, 5_000);
+  setInterval(loadStats,     5_000);
   setInterval(loadTrades,  60_000);
   setInterval(loadSignals, 120_000);
 }

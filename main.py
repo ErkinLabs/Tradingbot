@@ -24,6 +24,7 @@ import config
 from bot_macd          import MACDBot
 from bot_rsi_vwap      import RSIVWAPBot
 from bot_cvd           import CVDBot
+from portfolio         import portfolio_summary
 from terminal_dashboard import Dashboard
 from kline_buffer      import KlineBuffer
 from kline_stream      import KlineStreamManager
@@ -108,15 +109,39 @@ def _print_final_stats(bots) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def _heartbeat_loop(bots, stop_event: threading.Event) -> None:
-    """Log a one-line status for every bot every 5 minutes."""
+    """Log per-bot and portfolio status every 5 minutes."""
+    import logging
+    portfolio_log = logging.getLogger("PORTFOLIO")
+
     while not stop_event.wait(300):
+        summary = portfolio_summary(bots)
         for bot in bots:
             s = bot.get_stats()
             bot.log.info(
-                "HEARTBEAT | balance=%.2f trades=%d pnl=%.4f paused=%s open=%s",
-                s["balance"], s["trades"], s["total_pnl"], s["paused"],
+                "HEARTBEAT | kasa=%.2f equity=%.2f | "
+                "gunluk=%+.4f(%+.2f%%) realized=%+.4f unrealized=%+.4f | "
+                "toplam_pnl=%+.4f | trades=%d(bugun=%d) win=%.1f%% | "
+                "paused=%s open=%s",
+                s["balance"], s["equity"],
+                s["daily_pnl"], s["daily_pnl_pct"],
+                s["daily_realized_pnl"], s["unrealized_pnl"],
+                s["total_pnl"],
+                s["trades"], s["trades_today"], s["win_rate"],
+                s["paused"],
                 list(bot.positions.keys()) or [],
             )
+
+        p = summary
+        portfolio_log.info(
+            "PORTFOLIO | kasa=%.2f equity=%.2f | "
+            "gunluk=%+.4f(%+.2f%%) realized=%+.4f unrealized=%+.4f | "
+            "toplam_pnl=%+.4f(%+.2f%%) | trades_bugun=%d acik=%d",
+            p["total_balance"], p["total_equity"],
+            p["daily_pnl"], p["daily_pnl_pct"],
+            p["daily_realized_pnl"], p["total_unrealized"],
+            p["total_pnl"], p["total_return_pct"],
+            p["trades_today"], p["open_positions"],
+        )
 
 
 def _risk_guard_loop(bots, stop_event: threading.Event) -> None:
@@ -166,6 +191,15 @@ def main() -> None:
             mgr.register(symbol, bot.timeframe, buffers[(symbol, bot.timeframe)], bot.on_candle_close)
     mgr.start()
     console.print("  [green]✓[/green] WebSocket streams active\n")
+
+    # Attach PORTFOLIO logger to the same handlers as bots (Coolify / file logs)
+    import logging
+    portfolio_log = logging.getLogger("PORTFOLIO")
+    if not portfolio_log.handlers:
+        for h in bots[0].log.handlers:
+            portfolio_log.addHandler(h)
+        portfolio_log.setLevel(logging.INFO)
+        portfolio_log.propagate = False
 
     stop_event = threading.Event()
 

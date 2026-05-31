@@ -25,9 +25,25 @@
       </div>
     </div>
     <div class="header-center">
-      <span id="live-price">—</span>
-      <span id="price-change">—</span>
-      <span id="price-meta">H: — &nbsp; L: —</span>
+      <div class="wallet-strip">
+        <div class="wallet-item">
+          <span class="wallet-label">Kasa</span>
+          <span class="wallet-value" id="wallet-equity">—</span>
+        </div>
+        <div class="wallet-item">
+          <span class="wallet-label">Bugün</span>
+          <span class="wallet-value" id="wallet-daily">—</span>
+        </div>
+        <div class="wallet-item">
+          <span class="wallet-label">Toplam P&amp;L</span>
+          <span class="wallet-value" id="wallet-total-pnl">—</span>
+        </div>
+      </div>
+      <div class="price-strip">
+        <span id="live-price">—</span>
+        <span id="price-change">—</span>
+        <span id="price-meta">H: — &nbsp; L: —</span>
+      </div>
     </div>
     <div class="header-right">
       <span class="ws-dot disconnected" id="ws-dot"></span>

@@ -308,16 +308,16 @@ def _build_pnl_panel(bots) -> Panel:
     total_bal = 0.0
 
     for bot, s in zip(bots, stats_list):
-        dpnl   = _daily_pnl(bot)
+        dpnl   = s["daily_pnl"]
         dot    = "[yellow]●[/yellow]" if s["paused"] else "[green]●[/green]"
         tbl.add_row(
             f"{dot} {s['bot']}",
             _pnl_text(s["total_pnl"]),
             _pnl_text(dpnl),
-            f"{s['balance']:.2f}",
+            Text(f"{s['equity']:.2f}\n[dim]unrl {s['unrealized_pnl']:+.2f}[/dim]"),
         )
         total_pnl += s["total_pnl"]
-        total_bal += s["balance"]
+        total_bal += s["equity"]
 
     total_ret = (total_bal - config.INITIAL_BALANCE) / config.INITIAL_BALANCE * 100
     tbl.add_section()
