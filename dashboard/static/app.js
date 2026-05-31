@@ -747,7 +747,7 @@ function renderUniverseList() {
 
   if (metaEl) {
     if (u.dynamic_enabled) {
-      metaEl.textContent = `${u.active_count} aktif · ${u.pinned_count || 0} pin · ${u.whitelist_count || 0} whitelist`;
+      metaEl.textContent = `${u.active_count} hareketli coin · ${u.pinned_count || 0} açık pozisyon`;
     } else {
       metaEl.textContent = 'Statik evren (dinamik tarama kapalı)';
     }

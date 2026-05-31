@@ -142,7 +142,10 @@ class UniverseManager:
 
         scored = sorted(
             candidates,
-            key=lambda c: c["quote_volume"] * (1 + c["change_pct"] / 100),
+            key=lambda c: (
+                c["change_pct"] * 0.55
+                + min(c["quote_volume"] / 10_000_000, 10.0) * 0.45
+            ),
             reverse=True,
         )
         wl = [c["symbol"] for c in scored[: config.UNIVERSE_DAILY_TOP_N]]

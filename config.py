@@ -32,10 +32,10 @@ FALLBACK_SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"]
 SYMBOLS = FALLBACK_SYMBOLS  # static fallback when dynamic universe is disabled
 
 UNIVERSE_MIN_QUOTE_VOLUME_USDT = _float("UNIVERSE_MIN_QUOTE_VOLUME_USDT", 5_000_000)
-UNIVERSE_CANDIDATE_POOL        = _int("UNIVERSE_CANDIDATE_POOL", 40)
-UNIVERSE_DAILY_TOP_N           = _int("UNIVERSE_DAILY_TOP_N", 10)
-UNIVERSE_4H_SCAN_TOP           = _int("UNIVERSE_4H_SCAN_TOP", 15)
-UNIVERSE_ACTIVE_COUNT          = _int("UNIVERSE_ACTIVE_COUNT", 4)
+UNIVERSE_CANDIDATE_POOL        = _int("UNIVERSE_CANDIDATE_POOL", 50)
+UNIVERSE_DAILY_TOP_N           = _int("UNIVERSE_DAILY_TOP_N", 10)   # hacim filtresinden geçen aday havuzu
+UNIVERSE_4H_SCAN_TOP           = _int("UNIVERSE_4H_SCAN_TOP", 10)   # skorlanacak coin (whitelist kadar)
+UNIVERSE_ACTIVE_COUNT          = _int("UNIVERSE_ACTIVE_COUNT", 10)  # işlem + dashboard listesi (top movers)
 UNIVERSE_RESCAN_HOURS          = _int("UNIVERSE_RESCAN_HOURS", 4)
 UNIVERSE_SCANNER_TF            = os.getenv("UNIVERSE_SCANNER_TF", "4h")
 UNIVERSE_DAILY_TF              = os.getenv("UNIVERSE_DAILY_TF", "1d")

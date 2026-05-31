@@ -41,24 +41,36 @@ async def get_universe():
         scores    = mgr.last_scores
         whitelist = mgr.daily_whitelist
         dynamic   = config.USE_DYNAMIC_UNIVERSE
+        # Sidebar: top N skor + pin’li coinler (aktif evren dışında kalan pozisyonlar)
+        ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+        top_n  = config.UNIVERSE_ACTIVE_COUNT
+        display_set = {sym for sym, _ in ranked[:top_n]}
+        display_set |= pinned
+        display_syms = sorted(
+            display_set,
+            key=lambda s: (-scores.get(s, -1.0), s),
+        )
+        if not display_syms:
+            display_syms = list(active)
     elif bots:
         merged    = bots[0].trading_symbols
         active    = list(merged)
         scores    = {}
         whitelist = list(config.FALLBACK_SYMBOLS)
         dynamic   = config.USE_DYNAMIC_UNIVERSE
+        display_syms = list(merged)
     else:
         merged    = list(config.FALLBACK_SYMBOLS)
         active    = list(merged)
         scores    = {}
         whitelist = list(config.FALLBACK_SYMBOLS)
         dynamic   = False
+        display_syms = list(merged)
 
     active_set = set(active)
-    merged_set = set(merged)
 
     rows = []
-    for sym in merged:
+    for sym in display_syms:
         base = sym.split("/")[0]
         in_active = sym in active_set
         is_pinned = sym in pinned

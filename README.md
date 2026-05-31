@@ -50,7 +50,7 @@ docker run -p 7000:7000 -v ./logs:/app/logs -e DASHBOARD_API_KEY=your-secret tra
 | `TELEGRAM_BOT_TOKEN` | Telegram bildirim | — |
 | `TELEGRAM_CHAT_ID` | Telegram chat ID | — |
 | `USE_DYNAMIC_UNIVERSE` | 4s/günlük en hareketli coin taraması | true |
-| `UNIVERSE_ACTIVE_COUNT` | Aktif coin sayısı | 4 |
+| `UNIVERSE_ACTIVE_COUNT` | İşlem evreni + sidebar (top movers) | 10 |
 | `UNIVERSE_RESCAN_HOURS` | Universe yenileme aralığı | 4 |
 | `MAX_PORTFOLIO_POSITIONS` | Tüm botlarda max açık pozisyon | 3 |
 | `MAX_POSITIONS_PER_BOT` | Bot başına max pozisyon | 1 |
@@ -59,7 +59,7 @@ docker run -p 7000:7000 -v ./logs:/app/logs -e DASHBOARD_API_KEY=your-secret tra
 
 ## Dinamik universe & risk
 
-- **Universe scanner** (`universe_scanner.py`): Günlük hacim whitelist + 4 saatte bir ATR/değişim skoru ile top N coin seçer. Açık pozisyonlu coinler listeden düşmez.
+- **Universe scanner** (`universe_scanner.py`): Günlük hacim aday havuzu → 4 saatte bir ATR/değişim skoru ile **top 10** en hareketli coin. Açık pozisyonlu coinler listeden düşmez.
 - **Portföy riski** (`portfolio_risk.py`): En fazla 3 eşzamanlı pozisyon (tüm botlar), aynı coinde tek pozisyon, bot başına 1 pozisyon.
 - **MACD gevşetme**: Filtreler `config.py` / `.env` ile ayarlanır (varsayılan: vol×1.5, ADX≥18, RSI 40–78).
 
