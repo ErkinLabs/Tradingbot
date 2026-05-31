@@ -61,7 +61,17 @@ app.include_router(ws_router)
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "paper_trading": config.PAPER_TRADING}
+    from dashboard.server import get_universe_manager
+
+    mgr = get_universe_manager()
+    return {
+        "status": "ok",
+        "paper_trading": config.PAPER_TRADING,
+        "use_dynamic_universe": config.USE_DYNAMIC_UNIVERSE,
+        "universe_active_count": config.UNIVERSE_ACTIVE_COUNT,
+        "universe_scan_status": mgr.scan_status if mgr else None,
+        "universe_active_symbols": len(mgr.active_symbols) if mgr else None,
+    }
 
 
 @app.get("/")
