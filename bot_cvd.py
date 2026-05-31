@@ -39,6 +39,7 @@ import pandas_ta as ta
 
 import config
 from base_bot import BaseBot
+from cvd_utils import calc_cvd_bar_direction
 
 _LOOKBACK         = 10
 _MIN_PRICE_CHANGE = 0.008  # 0.8% — best balance of signal quality vs frequency
@@ -56,15 +57,8 @@ _TF_SECS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600}
 
 
 def _calc_cvd(df: pd.DataFrame) -> pd.Series:
-    """
-    Cumulative Volume Delta (bar-direction approximation).
-    Up-close bar  → +volume (net buyers dominated)
-    Down-close bar → -volume (net sellers dominated)
-    Equal bars counted as neutral (0).
-    """
-    signed = df["volume"].where(df["close"] > df["open"],
-             -df["volume"].where(df["close"] < df["open"], 0))
-    return signed.cumsum()
+    """Bar-direction CVD proxy (see cvd_utils.calc_cvd_trade_delta for trade-level)."""
+    return calc_cvd_bar_direction(df)
 
 
 class CVDBot(BaseBot):

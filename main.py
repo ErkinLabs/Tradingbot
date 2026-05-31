@@ -1,12 +1,12 @@
 """
 main.py — Entry point for the paper trading bot system.
 
-Starts three bots (MACD, RSI+VWAP, CVD) in separate threads,
-each executing their strategy every BOT_LOOP_SECS seconds.
+Starts three strategy bots driven by WebSocket kline close events.
+A background thread polls SL/TP every SL_TP_CHECK_SECS seconds.
 
 Features
-  - Per-bot daily-loss guard (pauses bot if limit hit)
-  - Rich terminal dashboard (auto-refreshes every 10 s)
+  - Per-bot daily-loss guard (pauses new entries; SL/TP still active)
+  - Rich terminal dashboard (auto-refreshes every second)
   - Graceful shutdown on Ctrl+C with final stats summary
   - Optional web dashboard: pass --with-dashboard to enable (port 7000)
 """
@@ -119,6 +119,18 @@ def _heartbeat_loop(bots, stop_event: threading.Event) -> None:
             )
 
 
+def _risk_guard_loop(bots, stop_event: threading.Event) -> None:
+    """Poll SL/TP on all bots — runs even when daily-loss pause is active."""
+    while not stop_event.wait(config.SL_TP_CHECK_SECS):
+        for bot in bots:
+            if not bot.positions:
+                continue
+            try:
+                bot.check_stop_loss_take_profit()
+            except Exception as exc:
+                bot.log.error("SL/TP guard error: %s", exc, exc_info=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Paper trading bot system")
     parser.add_argument("--with-dashboard", action="store_true",
@@ -182,6 +194,11 @@ def main() -> None:
         target=_heartbeat_loop, args=(bots, stop_event), daemon=True
     )
     hb_thread.start()
+
+    risk_thread = threading.Thread(
+        target=_risk_guard_loop, args=(bots, stop_event), daemon=True
+    )
+    risk_thread.start()
 
     console.print("[bold cyan]All bots running. Press Ctrl+C to stop.[/bold cyan]\n")
 

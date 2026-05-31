@@ -111,7 +111,7 @@ async def get_signals(symbol: str = Query("BTC/USDT")):
     from bot_rsi_vwap import RSIVWAPBot
     from bot_cvd import CVDBot
 
-    exchange = ccxt.bybit(config.EXCHANGE_OPTS)
+    exchange = config.make_exchange()
     results  = []
 
     bot_defs = [

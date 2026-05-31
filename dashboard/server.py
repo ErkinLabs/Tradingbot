@@ -33,6 +33,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+import config
+
+from dashboard.auth import DashboardAuthMiddleware
 from dashboard.api.market import router as market_router
 from dashboard.api.trades import router as trades_router
 from dashboard.api.ws import router as ws_router
@@ -41,6 +44,7 @@ _STATIC = Path(__file__).parent / "static"
 
 app = FastAPI(title="Trading Bot Dashboard", docs_url=None, redoc_url=None)
 
+app.add_middleware(DashboardAuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -51,6 +55,11 @@ app.add_middleware(
 app.include_router(market_router, prefix="/api")
 app.include_router(trades_router, prefix="/api")
 app.include_router(ws_router)
+
+
+@app.get("/health")
+async def health() -> dict:
+    return {"status": "ok", "paper_trading": config.PAPER_TRADING}
 
 
 @app.get("/")

@@ -208,8 +208,7 @@ class BaseBot:
         self.paused: bool              = False
 
         # Exchange (public, no API keys) — used only for startup warmup
-        self.exchange = ccxt.bybit(config.EXCHANGE_OPTS)
-        self.exchange.load_markets()
+        self.exchange = config.make_exchange()
 
         # WebSocket kline buffers — keyed by symbol, attached by main.py at startup
         self._buffers: dict[str, KlineBuffer] = {}
@@ -237,9 +236,11 @@ class BaseBot:
         if symbol not in self._buffers:
             self.log.warning("on_candle_close fired for unregistered symbol %s — ignoring.", symbol)
             return
-        if self.check_daily_loss():
-            return
+        # SL/TP always runs — even when daily-loss pause blocks new entries
         self.check_stop_loss_take_profit()
+        self.check_daily_loss()
+        if self.paused:
+            return
         try:
             self._process_symbol(symbol)
         except Exception as exc:
@@ -378,8 +379,22 @@ class BaseBot:
 
     # ── Risk management ───────────────────────────────────────────────────────
 
+    def _bar_range_for_sl_tp(self, symbol: str) -> tuple[float, float]:
+        """
+        Return (low, high) for intra-bar SL/TP checks.
+        Uses the in-progress kline from the WebSocket buffer when available.
+        """
+        buf = self._buffers.get(symbol)
+        if buf is not None:
+            df = buf.get_df()
+            if not df.empty:
+                bar = df.iloc[-1]
+                return float(bar["low"]), float(bar["high"])
+        price = self.current_price(symbol)
+        return price, price
+
     def check_stop_loss_take_profit(self) -> None:
-        """Check all open positions and close on SL/TP breach."""
+        """Check all open positions and close on SL/TP breach (uses bar high/low)."""
         with self._positions_lock:
             symbols = list(self.positions.keys())
 
@@ -387,15 +402,15 @@ class BaseBot:
             with self._positions_lock:
                 if symbol not in self.positions:
                     continue
-                pos   = self.positions[symbol]
-                price = self.current_price(symbol)
-                entry = pos["entry_price"]
+                entry = self.positions[symbol]["entry_price"]
 
-            pct_change = (price - entry) / entry  # spot: long only
+            low, high = self._bar_range_for_sl_tp(symbol)
+            sl_price = entry * (1 - config.STOP_LOSS_PCT)
+            tp_price = entry * (1 + config.TAKE_PROFIT_PCT)
 
-            if pct_change <= -config.STOP_LOSS_PCT:
+            if low <= sl_price:
                 self.close_position(symbol, reason="stop_loss")
-            elif pct_change >= config.TAKE_PROFIT_PCT:
+            elif high >= tp_price:
                 self.close_position(symbol, reason="take_profit")
 
     def check_daily_loss(self) -> bool:
@@ -463,5 +478,5 @@ class BaseBot:
     # ── Entry point (subclasses override) ────────────────────────────────────
 
     def run_once(self) -> None:
-        """Called every BOT_LOOP_SECS by main.py. Override in each strategy."""
+        """Legacy polling hook — live trading uses on_candle_close() instead."""
         raise NotImplementedError

@@ -14,7 +14,7 @@ import config
 
 router = APIRouter()
 
-_exchange = ccxt.bybit(config.EXCHANGE_OPTS)
+_exchange = config.make_exchange()
 
 
 def _norm(symbol: str) -> str:

@@ -10,6 +10,26 @@ const CARD_CLASS = { MACD: 'macd-card', RSI_VWAP: 'rsivwap-card', CVD: 'cvd-card
 
 const BASE = '';  // same origin
 
+function apiHeaders() {
+  const key = sessionStorage.getItem('dashboard_api_key') || '';
+  return key ? { 'X-API-Key': key } : {};
+}
+
+async function apiFetch(url, opts = {}) {
+  const r = await fetch(url, {
+    ...opts,
+    headers: { ...apiHeaders(), ...(opts.headers || {}) },
+  });
+  if (r.status === 401 && !sessionStorage.getItem('dashboard_api_key')) {
+    const key = prompt('Dashboard API key required:');
+    if (key) {
+      sessionStorage.setItem('dashboard_api_key', key);
+      return apiFetch(url, opts);
+    }
+  }
+  return r;
+}
+
 // ═══════════════════════════════════════════════════════
 //  App State
 // ═══════════════════════════════════════════════════════
@@ -695,7 +715,7 @@ function setupHeaderEvents() {
 async function loadCandles() {
   try {
     const sym = S.symbol.replace('/', '-');
-    const r   = await fetch(`${BASE}/api/ohlcv/${sym}?timeframe=${S.timeframe}&limit=300`);
+    const r   = await apiFetch(`${BASE}/api/ohlcv/${sym}?timeframe=${S.timeframe}&limit=300`);
     S.candles = await r.json();
     // Default view: show last 120 candles
     S.view.count = 120;
@@ -709,7 +729,7 @@ async function loadCandles() {
 
 async function loadTrades() {
   try {
-    const r = await fetch(`${BASE}/api/trades`);
+    const r = await apiFetch(`${BASE}/api/trades`);
     S.trades = await r.json();
     render();
     renderRecentTrades();
@@ -721,7 +741,7 @@ async function loadTrades() {
 
 async function loadStats() {
   try {
-    const r   = await fetch(`${BASE}/api/stats`);
+    const r   = await apiFetch(`${BASE}/api/stats`);
     S.stats   = await r.json();
     renderPnLSummary();
     renderOpenPositions();
@@ -734,7 +754,7 @@ async function loadStats() {
 async function loadSignals() {
   try {
     const sym = encodeURIComponent(S.symbol);
-    const r   = await fetch(`${BASE}/api/signals?symbol=${sym}`);
+    const r   = await apiFetch(`${BASE}/api/signals?symbol=${sym}`);
     S.signals = await r.json();
     renderStatusBar();
   } catch (err) {
@@ -745,7 +765,7 @@ async function loadSignals() {
 async function loadTicker() {
   try {
     const sym = S.symbol.replace('/', '-');
-    const r   = await fetch(`${BASE}/api/ticker/${sym}`);
+    const r   = await apiFetch(`${BASE}/api/ticker/${sym}`);
     const d   = await r.json();
     updateLivePrice(d, null);
   } catch (err) {
@@ -1002,7 +1022,7 @@ async function pollPositionPrices() {
   }
   for (const sym of needed) {
     try {
-      const r = await fetch(`${BASE}/api/ticker/${sym.replace('/', '-')}`);
+      const r = await apiFetch(`${BASE}/api/ticker/${sym.replace('/', '-')}`);
       const d = await r.json();
       if (d.last) S.livePrices[sym] = d.last;
     } catch (_) {}

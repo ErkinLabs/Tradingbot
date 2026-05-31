@@ -47,30 +47,29 @@ EXCHANGE_ID     = os.getenv("EXCHANGE_ID", "bybit")
 EXCHANGE_OPTS   = {"defaultType": "spot"}  # Spot market (no leverage)
 COMMISSION_RATE = _float("COMMISSION_RATE", 0.001)  # 0.1% per trade side (Bybit spot taker)
 
+
+def make_exchange():
+    """Return a configured ccxt exchange instance (spot by default)."""
+    import ccxt
+    exchange_cls = getattr(ccxt, EXCHANGE_ID)
+    ex = exchange_cls(EXCHANGE_OPTS)
+    ex.load_markets()
+    return ex
+
 # ── Candle history ────────────────────────────────────────────────────────────
 OHLCV_LIMIT  = 200   # candles fetched by ccxt for one-off REST calls
 WARMUP_BARS  = 250   # candles seeded into each KlineBuffer at startup
 
-# ── pybit WebSocket — ccxt timeframe → pybit kline interval ──────────────────
-PYBIT_INTERVALS: dict = {
-    "1m":  1,
-    "3m":  3,
-    "5m":  5,
-    "15m": 15,
-    "30m": 30,
-    "1h":  60,
-    "2h":  120,
-    "4h":  240,
-    "1d":  "D",
-}
+# ── Risk guard loop ───────────────────────────────────────────────────────────
+SL_TP_CHECK_SECS = _int("SL_TP_CHECK_SECS", 5)  # background SL/TP poll interval
+
+# ── Web dashboard ─────────────────────────────────────────────────────────────
+DASHBOARD_API_KEY = os.getenv("DASHBOARD_API_KEY", "")  # empty = auth disabled (local dev)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_DIR        = "logs"
 TRADE_LOG_FILE = "logs/trades.csv"
 APP_LOG_FILE   = "logs/trading.log"
 
-# ── Dashboard ─────────────────────────────────────────────────────────────────
+# ── Terminal dashboard ────────────────────────────────────────────────────────
 DASHBOARD_REFRESH_SECS = 10
-
-# ── Main loop ─────────────────────────────────────────────────────────────────
-BOT_LOOP_SECS = 60  # each bot calls run_once() every N seconds

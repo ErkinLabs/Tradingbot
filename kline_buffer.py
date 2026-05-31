@@ -1,5 +1,5 @@
 """
-KlineBuffer — thread-safe rolling OHLCV DataFrame backed by pybit WebSocket kline messages.
+KlineBuffer — thread-safe rolling OHLCV DataFrame backed by WebSocket kline messages.
 
 Each buffer tracks one (symbol, timeframe) pair.
 """
@@ -13,7 +13,7 @@ import pandas as pd
 
 class KlineBuffer:
     """
-    Rolling window of OHLCV bars updated from pybit WebSocket kline messages.
+    Rolling window of OHLCV bars updated from Bybit WebSocket kline messages.
 
     Lifecycle:
         buf = KlineBuffer(maxlen=250)
@@ -53,9 +53,9 @@ class KlineBuffer:
 
     def update(self, candle: dict) -> bool:
         """
-        Ingest one kline entry from a pybit WebSocket message.
+        Ingest one kline entry from a Bybit WebSocket message.
 
-        pybit sends both in-progress ticks (confirm=false) and the final
+        Bybit sends both in-progress ticks (confirm=false) and the final
         closed-bar tick (confirm=true). In-progress ticks overwrite the last
         row in place; the confirmed tick appends a new row.
 

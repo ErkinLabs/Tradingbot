@@ -23,12 +23,14 @@ def _make_bot(balance: float = 3_300.0):
         name = "TEST"
         def run_once(self): pass
 
+    mock_exchange = MagicMock()
     with (
-        patch("base_bot.ccxt.bybit"),
+        patch("base_bot.config.make_exchange", return_value=mock_exchange),
         patch("base_bot._load_state", return_value={}),
         patch("base_bot._save_state"),
     ):
         bot = ConcreteBot()
+    bot.exchange = mock_exchange
     bot.balance = balance
     bot.start_balance = balance
     bot._day_start_balance = balance
@@ -129,7 +131,7 @@ class TestDailyLossGuard(unittest.TestCase):
         self.bot._current_day = date.today() - timedelta(days=1)
         self.bot.check_daily_loss()
         self.assertFalse(self.bot.paused)
-        self.assertEqual(self.bot._day_trade_count, 0)
+        self.assertEqual(self.bot._day_start_balance, self.bot.balance)
 
 
 # ── SL / TP ───────────────────────────────────────────────────────────────────
@@ -166,6 +168,33 @@ class TestStopLossTakeProfit(unittest.TestCase):
         self._open_and_set_price(safe_price)
         self.bot.check_stop_loss_take_profit()
         self.assertIn("BTC/USDT", self.bot.positions)
+
+    def test_sl_tp_runs_when_paused_on_candle_close(self):
+        """Daily-loss pause must not block SL/TP on candle close."""
+        from kline_buffer import KlineBuffer
+        import pandas as pd
+        import numpy as np
+
+        self.bot.paused = True
+        buf = KlineBuffer(maxlen=50)
+        idx = pd.date_range("2024-01-01", periods=5, freq="5min", tz="UTC")
+        df = pd.DataFrame(
+            {
+                "open":   [40_000.0] * 5,
+                "high":   [40_000.0] * 5,
+                "low":    [38_000.0] * 5,
+                "close":  [39_000.0] * 5,
+                "volume": [100.0] * 5,
+            },
+            index=idx,
+        )
+        buf.seed(df)
+        self.bot.attach_buffer("BTC/USDT", buf)
+        self.bot.open_position("BTC/USDT", "long")
+        with patch.object(self.bot, "_process_symbol") as mock_proc:
+            self.bot.on_candle_close("BTC/USDT")
+        mock_proc.assert_not_called()
+        self.assertNotIn("BTC/USDT", self.bot.positions)
 
 
 # ── Thread safety ─────────────────────────────────────────────────────────────
