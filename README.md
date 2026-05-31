@@ -49,12 +49,29 @@ docker run -p 7000:7000 -v ./logs:/app/logs -e DASHBOARD_API_KEY=your-secret tra
 | `DASHBOARD_API_KEY` | Web `/api/*` auth (boş = kapalı) | — |
 | `TELEGRAM_BOT_TOKEN` | Telegram bildirim | — |
 | `TELEGRAM_CHAT_ID` | Telegram chat ID | — |
+| `USE_DYNAMIC_UNIVERSE` | 4s/günlük en hareketli coin taraması | true |
+| `UNIVERSE_ACTIVE_COUNT` | Aktif coin sayısı | 4 |
+| `UNIVERSE_RESCAN_HOURS` | Universe yenileme aralığı | 4 |
+| `MAX_PORTFOLIO_POSITIONS` | Tüm botlarda max açık pozisyon | 3 |
+| `MAX_POSITIONS_PER_BOT` | Bot başına max pozisyon | 1 |
+| `MACD_VOL_MULT` | MACD hacim filtresi çarpanı | 1.5 |
+| `MACD_ADX_MIN` | MACD minimum ADX | 18 |
+
+## Dinamik universe & risk
+
+- **Universe scanner** (`universe_scanner.py`): Günlük hacim whitelist + 4 saatte bir ATR/değişim skoru ile top N coin seçer. Açık pozisyonlu coinler listeden düşmez.
+- **Portföy riski** (`portfolio_risk.py`): En fazla 3 eşzamanlı pozisyon (tüm botlar), aynı coinde tek pozisyon, bot başına 1 pozisyon.
+- **MACD gevşetme**: Filtreler `config.py` / `.env` ile ayarlanır (varsayılan: vol×1.5, ADX≥18, RSI 40–78).
+
+Coolify/deploy için `/app/logs` persistent volume önerilir; aksi halde redeploy bakiyeyi sıfırlar.
 
 ## Mimari
 
 ```
 main.py
   ├── 3 bot (MACD, RSI_VWAP, CVD) → BaseBot
+  ├── UniverseManager (opsiyonel dinamik coin seçimi)
+  ├── PortfolioRiskManager (cross-bot pozisyon limiti)
   ├── KlineStreamManager (Bybit WS) → on_candle_close
   ├── risk_guard_loop (SL/TP her N saniye)
   └── terminal_dashboard / opsiyonel web dashboard

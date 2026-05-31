@@ -86,7 +86,7 @@ class MACDBot(BaseBot):
 
         self.check_stop_loss_take_profit()
 
-        for symbol in config.SYMBOLS:
+        for symbol in self.trading_symbols:
             try:
                 self._process_symbol(symbol)
             except Exception as exc:
@@ -169,8 +169,8 @@ class MACDBot(BaseBot):
             price      = float(df["close"].iloc[-1])
 
         # ── Signal logic ──────────────────────────────────────────────────────
-        vol_spike    = latest_vol > vol_sma * 2.0
-        hist_growing = abs(curr_hist) > abs(prev_hist)
+        vol_spike    = latest_vol > vol_sma * config.MACD_VOL_MULT
+        hist_growing = abs(curr_hist) > abs(prev_hist) if config.MACD_REQUIRE_HIST_GROWING else True
 
         if pos_side == "long":
             # Minimum hold: suppress all exits for the first N bars
@@ -189,9 +189,22 @@ class MACDBot(BaseBot):
                 return "close"
 
         else:  # flat — zero-cross entry
+            atr_series = ta.atr(df["high"], df["low"], df["close"], length=14)
+            atr_pct = (
+                float(atr_series.iloc[-1]) / price
+                if atr_series is not None and not pd.isna(atr_series.iloc[-1]) and price > 0
+                else 0.0
+            )
+            if atr_pct < config.MACD_MIN_ATR_PCT:
+                return None
+
             if vol_spike and hist_growing and ema200_val is not None:
                 if prev_hist < 0 and curr_hist > 0 and price > ema200_val:
-                    if 45 <= rsi_val <= 75 and adx_val >= 20 and macd_line > 0:
+                    if (
+                        config.MACD_RSI_MIN <= rsi_val <= config.MACD_RSI_MAX
+                        and adx_val >= config.MACD_ADX_MIN
+                        and macd_line > 0
+                    ):
                         return "buy"
 
         return None
@@ -249,11 +262,16 @@ class MACDBot(BaseBot):
             _why = ""
             if signal is None and symbol not in self.positions:
                 if not (_h1 < 0 and _h0 > 0):         _why = f"no-zero-cross(hist={_h1:.5f}→{_h0:.5f})"
-                elif _vr <= 2.0:                        _why = f"low-volume(vol×{_vr:.2f}<2.0)"
-                elif not (abs(_h0) > abs(_h1)):         _why = "hist-not-growing"
-                elif _price <= _e200:                   _why = f"below-ema200({_price:.2f}≤{_e200:.2f})"
-                elif not (45 <= _rsi <= 75):            _why = f"rsi={_rsi:.1f}∉[45,75]"
-                elif _adx < 20:                         _why = f"adx={_adx:.1f}<20"
+                elif _vr <= config.MACD_VOL_MULT:
+                    _why = f"low-volume(vol×{_vr:.2f}<{config.MACD_VOL_MULT})"
+                elif config.MACD_REQUIRE_HIST_GROWING and not (abs(_h0) > abs(_h1)):
+                    _why = "hist-not-growing"
+                elif _price <= _e200:
+                    _why = f"below-ema200({_price:.2f}≤{_e200:.2f})"
+                elif not (config.MACD_RSI_MIN <= _rsi <= config.MACD_RSI_MAX):
+                    _why = f"rsi={_rsi:.1f}∉[{config.MACD_RSI_MIN},{config.MACD_RSI_MAX}]"
+                elif _adx < config.MACD_ADX_MIN:
+                    _why = f"adx={_adx:.1f}<{config.MACD_ADX_MIN}"
                 elif _ml <= 0:                          _why = f"macd_line={_ml:.5f}≤0"
             self.log.debug(
                 "MACD %s | hist=%.5f→%.5f line=%.5f price=%.2f ema200=%.2f "

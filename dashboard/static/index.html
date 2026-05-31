@@ -11,10 +11,6 @@
   <!-- ── Header (full width) ── -->
   <header id="header">
     <div class="header-left">
-      <div class="pair-selector" id="pair-selector">
-        <button class="pair-btn active" data-pair="BTC/USDT">BTC/USDT</button>
-        <button class="pair-btn" data-pair="SOL/USDT">SOL/USDT</button>
-      </div>
       <div class="tf-selector" id="tf-selector">
         <button class="tf-btn" data-tf="1m">1m</button>
         <button class="tf-btn active" data-tf="5m">5m</button>
@@ -41,7 +37,19 @@
   <!-- ── Main Layout ── -->
   <div id="main-layout">
 
-    <!-- ── Left: chart + controls ── -->
+    <!-- ── Left: tradable universe ── -->
+    <aside id="universe-panel">
+      <div class="uni-header">
+        <span class="uni-title">İşlem Evreni</span>
+        <span id="uni-count" class="uni-badge">—</span>
+      </div>
+      <div id="universe-meta" class="uni-meta">yükleniyor…</div>
+      <div id="universe-list" class="universe-list">
+        <div class="rp-empty">Loading…</div>
+      </div>
+    </aside>
+
+    <!-- ── Center: chart + controls ── -->
     <div id="chart-side">
       <div id="chart-container">
         <canvas id="chart"></canvas>

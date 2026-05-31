@@ -24,7 +24,7 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timezone
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import ccxt
 import pandas as pd
@@ -220,11 +220,30 @@ class BaseBot:
         # WebSocket kline buffers — keyed by symbol, attached by main.py at startup
         self._buffers: dict[str, KlineBuffer] = {}
 
+        # Dynamic symbol list + portfolio risk (wired by main.py)
+        self._symbol_provider: Optional[Callable[[], list]] = None
+        self._portfolio_risk = None
+
         restored = len(self.positions) > 0 or len(self.closed_trades) > 0
         self.log.info(
             "Initialised | balance=%.2f USDT | symbols=%s | restored=%s",
-            self.balance, config.SYMBOLS, restored,
+            self.balance, self.trading_symbols, restored,
         )
+
+    # ── Wiring (called by main.py) ────────────────────────────────────────────
+
+    def attach_symbol_provider(self, provider) -> None:
+        """Callable returning the current list of tradable symbols."""
+        self._symbol_provider = provider
+
+    def attach_portfolio_risk(self, manager) -> None:
+        self._portfolio_risk = manager
+
+    @property
+    def trading_symbols(self) -> list:
+        if self._symbol_provider:
+            return self._symbol_provider()
+        return list(config.SYMBOLS)
 
     # ── Buffer attachment (called by main.py at startup) ─────────────────────
 
@@ -285,6 +304,8 @@ class BaseBot:
         self.check_daily_loss()
         if self.paused:
             return
+        if symbol not in self.trading_symbols and symbol not in self.positions:
+            return
         try:
             self._process_symbol(symbol)
         except Exception as exc:
@@ -343,6 +364,12 @@ class BaseBot:
         """
         if not config.PAPER_TRADING:
             raise RuntimeError("Real trading is disabled.")
+
+        if self._portfolio_risk is not None:
+            ok, reason = self._portfolio_risk.can_open(self, symbol)
+            if not ok:
+                self.log.debug("OPEN blocked (%s): %s %s", reason, self.name, symbol)
+                return
 
         with self._positions_lock:
             if symbol in self.positions:

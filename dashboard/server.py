@@ -38,6 +38,7 @@ import config
 from dashboard.auth import DashboardAuthMiddleware
 from dashboard.api.market import router as market_router
 from dashboard.api.trades import router as trades_router
+from dashboard.api.universe import router as universe_router
 from dashboard.api.ws import router as ws_router
 
 _STATIC = Path(__file__).parent / "static"
@@ -54,6 +55,7 @@ app.add_middleware(
 
 app.include_router(market_router, prefix="/api")
 app.include_router(trades_router, prefix="/api")
+app.include_router(universe_router, prefix="/api")
 app.include_router(ws_router)
 
 
@@ -74,6 +76,7 @@ app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
 # Populated by main.py when --with-dashboard is active.
 
 _live_bots: list = []
+_universe_manager = None
 
 
 def register_bots(bots: list) -> None:
@@ -81,8 +84,17 @@ def register_bots(bots: list) -> None:
     _live_bots = bots
 
 
+def register_universe(manager) -> None:
+    global _universe_manager
+    _universe_manager = manager
+
+
 def get_live_bots() -> list:
     return _live_bots
+
+
+def get_universe_manager():
+    return _universe_manager
 
 
 # ── Runner ────────────────────────────────────────────────────────────────────

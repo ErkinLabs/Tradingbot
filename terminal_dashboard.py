@@ -57,14 +57,24 @@ def _pct_text(value: float) -> Text:
 # ── Data helpers ───────────────────────────────────────────────────────────────
 
 def _get_chart_df(bots):
-    """Return (DataFrame, symbol) for the chart — BTC/USDT from first live buffer."""
-    symbol = config.SYMBOLS[0]
-    for bot in bots:
-        buf = bot._buffers.get(symbol)
-        if buf is not None:
-            df = buf.get_df()
-            if not df.empty and len(df) > 10:
-                return df, symbol
+    """Return (DataFrame, symbol) for the chart — first available live buffer."""
+    candidates: list[str] = []
+    if bots:
+        candidates.extend(bots[0].trading_symbols)
+    candidates.extend(config.FALLBACK_SYMBOLS)
+    seen: set[str] = set()
+    symbol = config.FALLBACK_SYMBOLS[0]
+    for sym in candidates:
+        if sym in seen:
+            continue
+        seen.add(sym)
+        for bot in bots:
+            buf = bot._buffers.get(sym)
+            if buf is not None:
+                df = buf.get_df()
+                if not df.empty and len(df) > 10:
+                    return df, sym
+        symbol = sym
     return None, symbol
 
 

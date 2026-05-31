@@ -82,7 +82,6 @@ html, body {
 }
 
 .pair-selector, .tf-selector { display: flex; gap: 4px; }
-.tf-selector { padding-left: 12px; border-left: 1px solid var(--border); }
 
 .pair-btn, .tf-btn {
   background: transparent;
@@ -190,10 +189,125 @@ html, body {
 }
 
 /* ══════════════════════════════════════
-   Chart Side (70%)
+   Universe sidebar (left)
+══════════════════════════════════════ */
+#universe-panel {
+  flex: 0 0 172px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.uni-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
+  gap: 6px;
+}
+
+.uni-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.uni-badge {
+  background: var(--bg3);
+  color: var(--text);
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.uni-meta {
+  flex-shrink: 0;
+  padding: 0 12px 8px;
+  font-size: 9px;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.universe-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+.universe-list::-webkit-scrollbar { width: 4px; }
+.universe-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+.uni-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  border-left: 2px solid transparent;
+  transition: background 0.12s, border-color 0.12s;
+}
+.uni-item:hover { background: rgba(255,255,255,0.03); }
+.uni-item.active {
+  background: rgba(59,130,246,0.12);
+  border-left-color: var(--blue);
+}
+
+.uni-row-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.uni-base {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.uni-quote {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.uni-badges {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.uni-tag {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: 3px;
+  line-height: 1.3;
+}
+.uni-tag--active { background: rgba(34,197,94,0.18); color: var(--green); }
+.uni-tag--pinned { background: rgba(251,191,36,0.18); color: var(--yellow); }
+.uni-tag--score  { background: rgba(59,130,246,0.15); color: #93c5fd; }
+
+.uni-row-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.uni-pos-bots { color: var(--amber); }
+
+/* ══════════════════════════════════════
+   Chart Side
 ══════════════════════════════════════ */
 #chart-side {
-  flex: 0 0 70%;
+  flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -257,7 +371,9 @@ html, body {
    Right Panel (30%)
 ══════════════════════════════════════ */
 #right-panel {
-  flex: 0 0 30%;
+  flex: 0 0 28%;
+  min-width: 260px;
+  max-width: 360px;
   display: flex;
   flex-direction: column;
   overflow: hidden;

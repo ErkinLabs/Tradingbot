@@ -12,6 +12,7 @@ Features
 """
 
 import argparse
+import logging
 import signal
 import threading
 import time
@@ -25,16 +26,19 @@ from bot_macd          import MACDBot
 from bot_rsi_vwap      import RSIVWAPBot
 from bot_cvd           import CVDBot
 from portfolio         import portfolio_summary
+from portfolio_risk    import PortfolioRiskManager
 from terminal_dashboard import Dashboard
 from kline_buffer      import KlineBuffer
 from kline_stream      import KlineStreamManager
+from universe_scanner  import UniverseManager
 
 console = Console()
+log = logging.getLogger("Main")
 
 
 # ── Startup summary ───────────────────────────────────────────────────────────
 
-def _print_startup_summary(bots) -> None:
+def _print_startup_summary(bots, symbols: list[str]) -> None:
     tbl = Table(
         title="[bold cyan]Paper Trading System — Startup[/bold cyan]",
         box=box.ROUNDED,
@@ -55,7 +59,7 @@ def _print_startup_summary(bots) -> None:
             f"{alloc_pct:.0f}%",
             f"{bot.balance:.2f} USDT",
             tf,
-            ", ".join(config.SYMBOLS),
+            ", ".join(symbols),
         )
 
     console.print()
@@ -156,6 +160,57 @@ def _risk_guard_loop(bots, stop_event: threading.Event) -> None:
                 bot.log.error("SL/TP guard error: %s", exc, exc_info=True)
 
 
+def _sync_market_data(
+    bots,
+    buffers: dict,
+    mgr: KlineStreamManager,
+    symbols: list[str],
+    registered: set,
+    *,
+    reconnect: bool = False,
+) -> None:
+    """Seed buffers, attach to bots, register WS topics for new symbol×TF pairs."""
+    added = False
+    for bot in bots:
+        for symbol in symbols:
+            key = (symbol, bot.timeframe)
+            if key not in buffers:
+                buf = KlineBuffer(maxlen=config.WARMUP_BARS)
+                df  = bot.fetch_ohlcv(symbol, bot.timeframe)
+                buf.seed(df)
+                buffers[key] = buf
+                console.print(
+                    f"  [green]✓[/green] Seeded {symbol} {bot.timeframe} ({len(df)} bars)"
+                )
+            bot.attach_buffer(symbol, buffers[key])
+            if key not in registered:
+                mgr.register(symbol, bot.timeframe, buffers[key], bot.on_candle_close)
+                registered.add(key)
+                added = True
+    if reconnect and added:
+        mgr.request_reconnect()
+
+
+def _universe_loop(
+    universe: UniverseManager,
+    bots,
+    buffers: dict,
+    mgr: KlineStreamManager,
+    registered: set,
+    stop_event: threading.Event,
+) -> None:
+    while not stop_event.wait(60):
+        if not universe.should_rescan():
+            continue
+        try:
+            symbols = universe.rescan()
+            _sync_market_data(
+                bots, buffers, mgr, symbols, registered, reconnect=True
+            )
+        except Exception as exc:
+            log.error("Universe rescan failed: %s", exc, exc_info=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Paper trading bot system")
     parser.add_argument("--with-dashboard", action="store_true",
@@ -167,28 +222,36 @@ def main() -> None:
     console.print("[bold green]Initialising bots…[/bold green]")
     bots = [MACDBot(), RSIVWAPBot(), CVDBot()]
 
-    _print_startup_summary(bots)
+    portfolio_risk = PortfolioRiskManager(lambda: bots)
+    universe: UniverseManager | None = None
+
+    if config.USE_DYNAMIC_UNIVERSE:
+        console.print("[bold cyan]Scanning Bybit spot universe…[/bold cyan]")
+        universe = UniverseManager(bots[0].exchange, lambda: bots)
+        active_symbols = universe.initial_scan()
+    else:
+        active_symbols = list(config.FALLBACK_SYMBOLS)
+
+    def get_symbols() -> list[str]:
+        if universe is not None:
+            return universe.get_symbols()
+        return list(config.FALLBACK_SYMBOLS)
+
+    for bot in bots:
+        bot.attach_symbol_provider(get_symbols)
+        bot.attach_portfolio_risk(portfolio_risk)
+
+    _print_startup_summary(bots, active_symbols)
 
     # ── Seed candle buffers from REST warmup ──────────────────────────────────
     console.print("[bold cyan]Seeding candle buffers from REST…[/bold cyan]")
     buffers: dict[tuple, KlineBuffer] = {}
-    for bot in bots:
-        for symbol in config.SYMBOLS:
-            key = (symbol, bot.timeframe)
-            if key not in buffers:
-                buf = KlineBuffer(maxlen=config.WARMUP_BARS)
-                df  = bot.fetch_ohlcv(symbol, bot.timeframe)
-                buf.seed(df)
-                buffers[key] = buf
-                console.print(f"  [green]✓[/green] Seeded {symbol} {bot.timeframe} ({len(df)} bars)")
-            bot.attach_buffer(symbol, buffers[key])
+    registered: set[tuple] = set()
+    mgr = KlineStreamManager()
+    _sync_market_data(bots, buffers, mgr, get_symbols(), registered)
 
     # ── Wire up WebSocket kline stream ────────────────────────────────────────
     console.print("[bold cyan]Starting WebSocket kline stream…[/bold cyan]")
-    mgr = KlineStreamManager()
-    for bot in bots:
-        for symbol in config.SYMBOLS:
-            mgr.register(symbol, bot.timeframe, buffers[(symbol, bot.timeframe)], bot.on_candle_close)
     mgr.start()
     console.print("  [green]✓[/green] WebSocket streams active\n")
 
@@ -217,8 +280,10 @@ def main() -> None:
 
     # Optionally start web dashboard
     if args.with_dashboard:
-        from dashboard.server import run as run_web, register_bots
+        from dashboard.server import run as run_web, register_bots, register_universe
         register_bots(bots)
+        if universe is not None:
+            register_universe(universe)
         web_thread = threading.Thread(target=run_web, kwargs={"port": 7000}, daemon=True)
         web_thread.start()
         console.print("[bold cyan]Web dashboard running at http://localhost:7000[/bold cyan]")
@@ -233,6 +298,15 @@ def main() -> None:
         target=_risk_guard_loop, args=(bots, stop_event), daemon=True
     )
     risk_thread.start()
+
+    if universe is not None:
+        uni_thread = threading.Thread(
+            target=_universe_loop,
+            args=(universe, bots, buffers, mgr, registered, stop_event),
+            daemon=True,
+            name="universe-scan",
+        )
+        uni_thread.start()
 
     console.print("[bold cyan]All bots running. Press Ctrl+C to stop.[/bold cyan]\n")
 

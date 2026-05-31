@@ -86,7 +86,7 @@ class CVDBot(BaseBot):
 
         self.check_stop_loss_take_profit()
 
-        for symbol in config.SYMBOLS:
+        for symbol in self.trading_symbols:
             try:
                 self._process_symbol(symbol)
             except Exception as exc:

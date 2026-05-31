@@ -27,7 +27,34 @@ BOT_ALLOCATIONS = {
 }
 
 # ── Universe ──────────────────────────────────────────────────────────────────
-SYMBOLS = ["BTC/USDT", "SOL/USDT", "RENDER/USDT"]
+USE_DYNAMIC_UNIVERSE = os.getenv("USE_DYNAMIC_UNIVERSE", "true").lower() in ("1", "true", "yes")
+FALLBACK_SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"]
+SYMBOLS = FALLBACK_SYMBOLS  # static fallback when dynamic universe is disabled
+
+UNIVERSE_MIN_QUOTE_VOLUME_USDT = _float("UNIVERSE_MIN_QUOTE_VOLUME_USDT", 5_000_000)
+UNIVERSE_CANDIDATE_POOL        = _int("UNIVERSE_CANDIDATE_POOL", 40)
+UNIVERSE_DAILY_TOP_N           = _int("UNIVERSE_DAILY_TOP_N", 10)
+UNIVERSE_4H_SCAN_TOP           = _int("UNIVERSE_4H_SCAN_TOP", 15)
+UNIVERSE_ACTIVE_COUNT          = _int("UNIVERSE_ACTIVE_COUNT", 4)
+UNIVERSE_RESCAN_HOURS          = _int("UNIVERSE_RESCAN_HOURS", 4)
+UNIVERSE_SCANNER_TF            = os.getenv("UNIVERSE_SCANNER_TF", "4h")
+UNIVERSE_DAILY_TF              = os.getenv("UNIVERSE_DAILY_TF", "1d")
+UNIVERSE_W_ATR                 = _float("UNIVERSE_W_ATR", 0.45)
+UNIVERSE_W_CHANGE              = _float("UNIVERSE_W_CHANGE", 0.35)
+UNIVERSE_W_VOLUME              = _float("UNIVERSE_W_VOLUME", 0.20)
+UNIVERSE_EXCLUDE_BASES         = {"USDT", "USDC", "DAI", "EUR", "BUSD"}
+
+# ── Portfolio risk (cross-bot) ────────────────────────────────────────────────
+MAX_PORTFOLIO_POSITIONS = _int("MAX_PORTFOLIO_POSITIONS", 3)
+MAX_POSITIONS_PER_BOT   = _int("MAX_POSITIONS_PER_BOT", 1)
+
+# ── MACD entry filters (relaxed defaults) ───────────────────────────────────
+MACD_VOL_MULT              = _float("MACD_VOL_MULT", 1.5)
+MACD_ADX_MIN               = _float("MACD_ADX_MIN", 18.0)
+MACD_RSI_MIN               = _float("MACD_RSI_MIN", 40.0)
+MACD_RSI_MAX               = _float("MACD_RSI_MAX", 78.0)
+MACD_REQUIRE_HIST_GROWING   = os.getenv("MACD_REQUIRE_HIST_GROWING", "false").lower() in ("1", "true", "yes")
+MACD_MIN_ATR_PCT           = _float("MACD_MIN_ATR_PCT", 0.004)  # skip tiny moves vs commission
 
 # ── Risk parameters ───────────────────────────────────────────────────────────
 MAX_POSITION_PCT    = _float("MAX_POSITION_PCT",   0.10)  # 10% of bot balance per trade

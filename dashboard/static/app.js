@@ -41,6 +41,7 @@ const S = {
   trades:    [],
   stats:     [],
   portfolio: null,
+  universe:  null,
   signals:   [],
   livePrice:  null,
   livePrices: {},   // { 'BTC/USDT': 76000, 'SOL/USDT': 86 } — live price per symbol
@@ -671,15 +672,10 @@ function setupCanvasEvents() {
 // ═══════════════════════════════════════════════════════
 
 function setupHeaderEvents() {
-  document.getElementById('pair-selector').addEventListener('click', e => {
-    const btn = e.target.closest('[data-pair]');
-    if (!btn) return;
-    document.querySelectorAll('.pair-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    S.symbol = btn.dataset.pair;
-    const pairEl = document.getElementById('header-pair');
-    if (pairEl) pairEl.textContent = S.symbol;
-    loadAll();
+  document.getElementById('universe-list').addEventListener('click', e => {
+    const item = e.target.closest('[data-symbol]');
+    if (!item) return;
+    selectSymbol(item.dataset.symbol);
   });
 
   document.getElementById('tf-selector').addEventListener('click', e => {
@@ -714,6 +710,94 @@ function setupHeaderEvents() {
 // ═══════════════════════════════════════════════════════
 //  Data fetching
 // ═══════════════════════════════════════════════════════
+
+async function loadUniverse() {
+  try {
+    const r = await apiFetch(`${BASE}/api/universe`);
+    S.universe = await r.json();
+    renderUniverseList();
+  } catch (err) {
+    console.error('loadUniverse:', err);
+  }
+}
+
+function selectSymbol(symbol) {
+  if (!symbol || symbol === S.symbol) return;
+  S.symbol = symbol;
+  const pairEl = document.getElementById('header-pair');
+  if (pairEl) pairEl.textContent = symbol;
+  document.querySelectorAll('.uni-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.symbol === symbol);
+  });
+  loadAll();
+}
+
+function renderUniverseList() {
+  const listEl = document.getElementById('universe-list');
+  const countEl = document.getElementById('uni-count');
+  const metaEl  = document.getElementById('universe-meta');
+  if (!listEl || !S.universe) return;
+
+  const u = S.universe;
+  const rows = u.symbols || [];
+
+  if (countEl) {
+    countEl.textContent = u.active_count != null ? String(u.active_count) : rows.length;
+  }
+
+  if (metaEl) {
+    if (u.dynamic_enabled) {
+      metaEl.textContent = `${u.active_count} aktif · ${u.pinned_count || 0} pin · ${u.whitelist_count || 0} whitelist`;
+    } else {
+      metaEl.textContent = 'Statik evren (dinamik tarama kapalı)';
+    }
+  }
+
+  if (!rows.length) {
+    listEl.innerHTML = '<div class="rp-empty">Coin bulunamadı</div>';
+    return;
+  }
+
+  let html = '';
+  for (const row of rows) {
+    const activeCls = row.symbol === S.symbol ? ' active' : '';
+    const tags = [];
+    if (row.in_universe) tags.push('<span class="uni-tag uni-tag--active">aktif</span>');
+    if (row.pinned) tags.push('<span class="uni-tag uni-tag--pinned">pos</span>');
+    if (row.score != null) tags.push(`<span class="uni-tag uni-tag--score">${row.score.toFixed(1)}</span>`);
+
+    const bots = (row.bots_with_position || []).join(', ');
+    const sub = bots
+      ? `<span class="uni-pos-bots">${bots}</span>`
+      : (row.in_universe ? 'işlem için seçili' : 'whitelist');
+
+    html += `<div class="uni-item${activeCls}" data-symbol="${row.symbol}">
+      <div class="uni-row-top">
+        <span class="uni-base">${row.base}</span>
+        <span class="uni-quote">/USDT</span>
+        <span class="uni-badges">${tags.join('')}</span>
+      </div>
+      <div class="uni-row-sub">${sub}</div>
+    </div>`;
+  }
+  listEl.innerHTML = html;
+
+  // İlk yüklemede seçili sembol listede yoksa ilk aktif coin'e geç
+  const symbols = rows.map(r => r.symbol);
+  if (!symbols.includes(S.symbol)) {
+    const first = rows.find(r => r.in_universe) || rows[0];
+    if (first) {
+      S.symbol = first.symbol;
+      const pairEl = document.getElementById('header-pair');
+      if (pairEl) pairEl.textContent = S.symbol;
+      document.querySelectorAll('.uni-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.symbol === S.symbol);
+      });
+      loadCandles();
+      connectWS();
+    }
+  }
+}
 
 async function loadCandles() {
   try {
@@ -750,6 +834,7 @@ async function loadStats() {
     renderPnLSummary();
     renderOpenPositions();
     renderStatusBar();
+    renderUniverseList();
   } catch (err) {
     console.error('loadStats:', err);
   }
@@ -856,6 +941,7 @@ async function loadTicker() {
 }
 
 async function loadAll() {
+  await loadUniverse();
   await loadCandles();
   await Promise.all([loadTrades(), loadStats(), loadPortfolio(), loadSignals(), loadTicker()]);
   connectWS();
@@ -1181,6 +1267,7 @@ async function init() {
   // Periodic refreshes — wallet/stats every 5s for live equity
   setInterval(loadPortfolio, 5_000);
   setInterval(loadStats,     5_000);
+  setInterval(loadUniverse, 60_000);
   setInterval(loadTrades,  60_000);
   setInterval(loadSignals, 120_000);
 }

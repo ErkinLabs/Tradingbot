@@ -82,7 +82,9 @@ class KlineStreamManager:
         key = (symbol, timeframe)
         with self._lock:
             self._buffers[key] = buffer
-            self._callbacks.setdefault(key, []).append(callback)
+            cbs = self._callbacks.setdefault(key, [])
+            if callback not in cbs:
+                cbs.append(callback)
 
         interval = TF_TO_INTERVAL.get(timeframe)
         if interval is None:
@@ -122,6 +124,18 @@ class KlineStreamManager:
             self._recv_thread.join(timeout=10)
         log.info("KlineStreamManager stopped.")
 
+    def request_reconnect(self) -> None:
+        """Force reconnect so newly registered topics are subscribed."""
+        with self._lock:
+            ws = self._ws
+            n = len(self._topic_to_key)
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
+        log.info("Reconnect requested (%d topic(s)).", n)
+
     # ── Recv loop (the core) ──────────────────────────────────────────────────
 
     def _recv_loop(self) -> None:
@@ -129,13 +143,17 @@ class KlineStreamManager:
         Connect → subscribe → recv forever.
         Any exception triggers a _RECONNECT_DELAY back-off and full reconnect.
         """
-        args    = list(self._topic_to_key.keys())
-        sub_msg = json.dumps({"op": "subscribe", "args": args})
-        ping    = json.dumps({"op": "ping"})
-
         while not self._stop_event.is_set():
+            with self._lock:
+                args = list(self._topic_to_key.keys())
+            sub_msg = json.dumps({"op": "subscribe", "args": args})
+            ping    = json.dumps({"op": "ping"})
+
             ws: Optional[websocket.WebSocket] = None
             try:
+                if not args:
+                    self._stop_event.wait(_RECONNECT_DELAY)
+                    continue
                 log.info("Connecting to %s …", _WS_URL)
                 ws = websocket.create_connection(_WS_URL, timeout=_RECV_TIMEOUT)
 
