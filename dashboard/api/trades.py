@@ -47,6 +47,8 @@ def _sharpe(net_pnls: list[float], start_bal: float) -> float:
 
 
 def _stats_from_rows(rows: list[dict], bot_name: str) -> dict:
+    from datetime import datetime, timezone
+
     n         = len(rows)
     pnls      = [float(r.get("net_pnl", 0)) for r in rows]
     wins      = sum(1 for p in pnls if p > 0)
@@ -55,17 +57,26 @@ def _stats_from_rows(rows: list[dict], bot_name: str) -> dict:
     start_bal = config.INITIAL_BALANCE * config.BOT_ALLOCATIONS.get(bot_name, 0.33)
     balance   = start_bal + total_pnl
     ret_pct   = ((balance - start_bal) / start_bal * 100) if start_bal else 0.0
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    today_rows = [
+        r for r in rows
+        if str(r.get("timestamp", "")).startswith(today)
+    ]
+    daily_realized = sum(float(r.get("net_pnl", 0)) for r in today_rows)
+    daily_pct      = (daily_realized / start_bal * 100) if start_bal else 0.0
+
     return {
         "bot":                bot_name,
         "trades":             n,
-        "trades_today":       0,
-        "wins_today":         0,
+        "trades_today":       len(today_rows),
+        "wins_today":         sum(1 for r in today_rows if float(r.get("net_pnl", 0)) > 0),
         "win_rate":           round(win_rate, 2),
         "total_pnl":          round(total_pnl, 4),
-        "daily_pnl":          0.0,
-        "daily_pnl_pct":      0.0,
-        "daily_realized_pnl": 0.0,
-        "daily_balance_chg":  0.0,
+        "daily_pnl":          round(daily_realized, 4),
+        "daily_pnl_pct":      round(daily_pct, 2),
+        "daily_realized_pnl": round(daily_realized, 4),
+        "daily_balance_chg":  round(daily_realized, 4),
         "unrealized_pnl":     0.0,
         "equity":             round(balance, 2),
         "sharpe":             _sharpe(pnls, start_bal),
@@ -118,18 +129,19 @@ async def get_portfolio():
         bot_stats.append(_stats_from_rows(_read_csv(name), name))
     total_bal = sum(s["balance"] for s in bot_stats)
     total_pnl = sum(s["total_pnl"] for s in bot_stats)
+    daily_pnl = sum(s["daily_pnl"] for s in bot_stats)
     initial   = config.INITIAL_BALANCE
     return {
         "initial_balance":    initial,
         "total_balance":      round(total_bal, 2),
         "total_equity":       round(total_bal, 2),
         "total_unrealized":   0.0,
-        "daily_pnl":          0.0,
-        "daily_pnl_pct":      0.0,
-        "daily_realized_pnl": 0.0,
+        "daily_pnl":          round(daily_pnl, 4),
+        "daily_pnl_pct":      round(daily_pnl / initial * 100, 2) if initial else 0.0,
+        "daily_realized_pnl": round(sum(s["daily_realized_pnl"] for s in bot_stats), 4),
         "total_pnl":          round(total_pnl, 4),
         "total_return_pct":   round((total_bal - initial) / initial * 100, 2) if initial else 0.0,
-        "trades_today":       0,
+        "trades_today":       sum(s["trades_today"] for s in bot_stats),
         "open_positions":     0,
         "bots":               bot_stats,
     }

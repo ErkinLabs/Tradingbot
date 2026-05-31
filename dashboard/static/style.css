@@ -16,7 +16,7 @@
   --purple:    #a855f7;
   --amber:     #f59e0b;
   --yellow:    #fbbf24;
-  --header-h:  68px;
+  --header-h:  56px;
   --status-h:  44px;
 }
 
@@ -49,23 +49,37 @@ html, body {
   z-index: 100;
 }
 
-.header-left  { display: flex; align-items: center; gap: 12px; }
+.header-left  { display: flex; align-items: center; gap: 12px; flex: 1 1 0; min-width: 0; }
 .header-center {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 2px;
-  min-width: 360px;
+  flex: 0 0 auto;
+  padding: 0 24px;
 }
-.header-right { display: flex; align-items: center; gap: 8px; }
+.header-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 1 1 0;
+  min-width: 120px;
+}
 
-.wallet-strip { display: flex; gap: 20px; align-items: center; }
-.wallet-item  { display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
-.wallet-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
-.wallet-value { font-size: 13px; font-weight: 700; }
-.wallet-value.pos { color: var(--green); }
-.wallet-value.neg { color: var(--red); }
-.price-strip  { display: flex; gap: 10px; align-items: baseline; font-size: 12px; }
+.price-strip {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  white-space: nowrap;
+}
+.price-pair {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
 
 .pair-selector, .tf-selector { display: flex; gap: 4px; }
 .tf-selector { padding-left: 12px; border-left: 1px solid var(--border); }
@@ -87,13 +101,78 @@ html, body {
   color: #fff; font-weight: 600;
 }
 
-#live-price { font-size: 22px; font-weight: 700; color: var(--text); transition: color 0.3s; }
+#live-price { font-size: 20px; font-weight: 700; color: var(--text); transition: color 0.3s; line-height: 1; }
 #live-price.flash-up   { color: var(--green); }
 #live-price.flash-down { color: var(--red); }
 #price-change { font-size: 14px; font-weight: 600; }
 #price-change.pos { color: var(--green); }
 #price-change.neg { color: var(--red); }
-#price-meta { font-size: 11px; color: var(--text-dim); }
+#price-meta { font-size: 10px; color: var(--text-dim); text-align: center; }
+
+/* ── Portfolio cards (right panel top) ── */
+.rp-portfolio {
+  padding: 10px 12px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border2);
+}
+
+.portfolio-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.portfolio-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 72px;
+}
+
+.portfolio-card--hero {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, rgba(59,130,246,0.12) 0%, var(--bg3) 100%);
+  border-color: rgba(59,130,246,0.25);
+}
+
+.portfolio-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.portfolio-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.portfolio-card--hero .portfolio-value {
+  font-size: 22px;
+}
+
+.portfolio-value.pos { color: var(--green); }
+.portfolio-value.neg { color: var(--red); }
+
+.portfolio-sub {
+  font-size: 10px;
+  color: var(--text-dim);
+  line-height: 1.3;
+}
+
+.portfolio-sub.pos { color: var(--green); }
+.portfolio-sub.neg { color: var(--red); }
+
+.wallet-value.pos { color: var(--green); }
+.wallet-value.neg { color: var(--red); }
 
 .ws-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .ws-dot.connected    { background: var(--green); box-shadow: 0 0 6px var(--green); }
@@ -226,7 +305,7 @@ html, body {
 
 .pnl-head {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr;
+  grid-template-columns: 1.1fr 0.9fr 0.9fr 1fr;
   font-size: 9px;
   color: var(--text-dim);
   letter-spacing: 0.05em;
@@ -237,7 +316,7 @@ html, body {
 }
 .pnl-row {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr;
+  grid-template-columns: 1.1fr 0.9fr 0.9fr 1fr;
   align-items: center;
   padding: 5px 0;
   border-bottom: 1px solid var(--border);
@@ -245,7 +324,7 @@ html, body {
 }
 .pnl-total-row {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr;
+  grid-template-columns: 1.1fr 0.9fr 0.9fr 1fr;
   align-items: center;
   padding: 6px 0 0;
   font-size: 12px;

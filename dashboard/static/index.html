@@ -25,25 +25,12 @@
       </div>
     </div>
     <div class="header-center">
-      <div class="wallet-strip">
-        <div class="wallet-item">
-          <span class="wallet-label">Kasa</span>
-          <span class="wallet-value" id="wallet-equity">—</span>
-        </div>
-        <div class="wallet-item">
-          <span class="wallet-label">Bugün</span>
-          <span class="wallet-value" id="wallet-daily">—</span>
-        </div>
-        <div class="wallet-item">
-          <span class="wallet-label">Toplam P&amp;L</span>
-          <span class="wallet-value" id="wallet-total-pnl">—</span>
-        </div>
-      </div>
       <div class="price-strip">
+        <span class="price-pair" id="header-pair">BTC/USDT</span>
         <span id="live-price">—</span>
         <span id="price-change">—</span>
-        <span id="price-meta">H: — &nbsp; L: —</span>
       </div>
+      <span id="price-meta">H: — &nbsp; L: — &nbsp; Vol: —</span>
     </div>
     <div class="header-right">
       <span class="ws-dot disconnected" id="ws-dot"></span>
@@ -87,9 +74,30 @@
     <!-- ── Right: info panel ── -->
     <div id="right-panel">
 
+      <!-- Portfolio summary cards -->
+      <div class="rp-section rp-portfolio" id="portfolio-section">
+        <div class="portfolio-grid">
+          <div class="portfolio-card portfolio-card--hero">
+            <span class="portfolio-label">Toplam Kasa</span>
+            <span class="portfolio-value" id="wallet-equity">—</span>
+            <span class="portfolio-sub" id="wallet-balance-sub">equity</span>
+          </div>
+          <div class="portfolio-card">
+            <span class="portfolio-label">Bugün (UTC)</span>
+            <span class="portfolio-value" id="wallet-daily">—</span>
+            <span class="portfolio-sub" id="wallet-daily-sub">—</span>
+          </div>
+          <div class="portfolio-card">
+            <span class="portfolio-label">Toplam P&amp;L</span>
+            <span class="portfolio-value" id="wallet-total-pnl">—</span>
+            <span class="portfolio-sub" id="wallet-return-sub">—</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Section 1: P&L Overview -->
       <div class="rp-section" id="pnl-section">
-        <div class="rp-title">P&amp;L Overview</div>
+        <div class="rp-title">Bot Performansı</div>
         <div id="pnl-content"><div class="rp-empty">Loading…</div></div>
       </div>
 

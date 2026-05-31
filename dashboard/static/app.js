@@ -677,6 +677,8 @@ function setupHeaderEvents() {
     document.querySelectorAll('.pair-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     S.symbol = btn.dataset.pair;
+    const pairEl = document.getElementById('header-pair');
+    if (pairEl) pairEl.textContent = S.symbol;
     loadAll();
   });
 
@@ -744,6 +746,7 @@ async function loadStats() {
   try {
     const r   = await apiFetch(`${BASE}/api/stats`);
     S.stats   = await r.json();
+    renderPortfolioCards();
     renderPnLSummary();
     renderOpenPositions();
     renderStatusBar();
@@ -756,31 +759,78 @@ async function loadPortfolio() {
   try {
     const r = await apiFetch(`${BASE}/api/portfolio`);
     S.portfolio = await r.json();
-    renderWalletStrip();
+    renderPortfolioCards();
     renderPnLSummary();
   } catch (err) {
     console.error('loadPortfolio:', err);
+    renderPortfolioCards();
   }
 }
 
-function renderWalletStrip() {
-  const p = S.portfolio;
-  if (!p) return;
+function getPortfolioView() {
+  if (S.portfolio) return S.portfolio;
+  if (!S.stats.length) return null;
 
-  const eqEl  = document.getElementById('wallet-equity');
-  const dayEl = document.getElementById('wallet-daily');
-  const totEl = document.getElementById('wallet-total-pnl');
-  if (!eqEl) return;
+  const initial = S.stats.reduce((s, b) => s + (b.start_balance || 0), 0) || 1000;
+  const total_balance    = S.stats.reduce((s, b) => s + b.balance, 0);
+  const total_equity     = S.stats.reduce((s, b) => s + (b.equity ?? b.balance), 0);
+  const total_unrealized = S.stats.reduce((s, b) => s + (b.unrealized_pnl || 0), 0);
+  const daily_pnl        = S.stats.reduce((s, b) => s + (b.daily_pnl || 0), 0);
+  const daily_realized   = S.stats.reduce((s, b) => s + (b.daily_realized_pnl || 0), 0);
+  const total_pnl        = S.stats.reduce((s, b) => s + b.total_pnl, 0);
+  const trades_today     = S.stats.reduce((s, b) => s + (b.trades_today || 0), 0);
+  const open_positions   = S.stats.reduce((s, b) => s + (b.open_positions?.length || 0), 0);
+
+  return {
+    initial_balance:    initial,
+    total_balance,
+    total_equity,
+    total_unrealized,
+    daily_pnl,
+    daily_pnl_pct:      initial ? (daily_pnl / initial * 100) : 0,
+    daily_realized_pnl: daily_realized,
+    total_pnl,
+    total_return_pct:   initial ? ((total_equity - initial) / initial * 100) : 0,
+    trades_today,
+    open_positions,
+    bots: S.stats,
+  };
+}
+
+function renderPortfolioCards() {
+  const p = getPortfolioView();
+  const eqEl   = document.getElementById('wallet-equity');
+  const dayEl  = document.getElementById('wallet-daily');
+  const totEl  = document.getElementById('wallet-total-pnl');
+  const balSub = document.getElementById('wallet-balance-sub');
+  const daySub = document.getElementById('wallet-daily-sub');
+  const retSub = document.getElementById('wallet-return-sub');
+  if (!eqEl || !p) return;
+
+  const fmtSigned = (v, dec = 2) => `${v >= 0 ? '+' : ''}${v.toFixed(dec)}`;
+  const cls = (v) => (v >= 0 ? 'pos' : 'neg');
 
   eqEl.textContent = `${p.total_equity.toFixed(2)} USDT`;
-  eqEl.className   = 'wallet-value';
+  eqEl.className   = 'portfolio-value';
 
-  const fmtSigned = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
-  dayEl.textContent = `${fmtSigned(p.daily_pnl)} (${fmtSigned(p.daily_pnl_pct)}%)`;
-  dayEl.className   = 'wallet-value ' + (p.daily_pnl >= 0 ? 'pos' : 'neg');
+  if (balSub) {
+    balSub.textContent = `nakit ${p.total_balance.toFixed(2)} · unrealized ${fmtSigned(p.total_unrealized)}`;
+    balSub.className   = 'portfolio-sub';
+  }
 
-  totEl.textContent = `${fmtSigned(p.total_pnl)} (${fmtSigned(p.total_return_pct)}%)`;
-  totEl.className   = 'wallet-value ' + (p.total_pnl >= 0 ? 'pos' : 'neg');
+  dayEl.textContent = `${fmtSigned(p.daily_pnl)} USDT`;
+  dayEl.className   = `portfolio-value ${cls(p.daily_pnl)}`;
+  if (daySub) {
+    daySub.textContent = `${fmtSigned(p.daily_pnl_pct)}% · ${p.trades_today} işlem bugün`;
+    daySub.className   = `portfolio-sub ${cls(p.daily_pnl)}`;
+  }
+
+  totEl.textContent = `${fmtSigned(p.total_pnl)} USDT`;
+  totEl.className   = `portfolio-value ${cls(p.total_pnl)}`;
+  if (retSub) {
+    retSub.textContent = `${fmtSigned(p.total_return_pct)}% · başlangıç ${p.initial_balance.toFixed(0)} USDT`;
+    retSub.className   = `portfolio-sub ${cls(p.total_pnl)}`;
+  }
 }
 
 async function loadSignals() {
@@ -888,7 +938,11 @@ function updateLivePrice(d, prev) {
   chEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
   chEl.className   = 'price-change ' + (pct >= 0 ? 'pos' : 'neg');
 
-  metaEl.innerHTML = `H: ${fmt(d.high_24h)} &nbsp; L: ${fmt(d.low_24h)}`;
+  metaEl.innerHTML = `H: ${fmt(d.high_24h)} &nbsp; L: ${fmt(d.low_24h)}` +
+    (d.volume_24h ? ` &nbsp; Vol: ${fmtVol(d.volume_24h)}` : '');
+
+  const pairEl = document.getElementById('header-pair');
+  if (pairEl) pairEl.textContent = S.symbol;
 }
 
 // ── Right panel Section 1: P&L overview ─────────────────
@@ -897,33 +951,33 @@ function renderPnLSummary() {
   const el = document.getElementById('pnl-content');
   if (!el || !S.stats.length) return;
 
-  let totalPnl = 0, totalBal = 0, totalDaily = 0, totalUnrl = 0;
+  let totalPnl = 0, totalEquity = 0, totalDaily = 0;
 
   let html = `<div class="pnl-table">
-    <div class="pnl-head"><span></span><span>Toplam</span><span>Bugün</span><span>Kasa</span><span>Unrlzd</span></div>`;
+    <div class="pnl-head"><span>Bot</span><span>Toplam</span><span>Bugün</span><span>Kasa</span></div>`;
 
   for (const s of S.stats) {
     const dayPnl = s.daily_pnl ?? 0;
-    totalPnl   += s.total_pnl;
-    totalBal   += s.balance;
-    totalDaily += dayPnl;
-    totalUnrl  += s.unrealized_pnl ?? 0;
+    const equity = s.equity ?? s.balance;
+    totalPnl    += s.total_pnl;
+    totalEquity += equity;
+    totalDaily  += dayPnl;
     const col = BOT_COLORS[s.bot] || '#fff';
+    const paused = s.paused ? ' ⏸' : '';
     html += `<div class="pnl-row">
-      <span class="pnl-bot-name" style="color:${col}">${s.bot}</span>
+      <span class="pnl-bot-name" style="color:${col}">${s.bot}${paused}</span>
       <span class="${s.total_pnl >= 0 ? 'pos' : 'neg'}">${s.total_pnl >= 0 ? '+' : ''}${s.total_pnl.toFixed(2)}</span>
       <span class="${dayPnl >= 0 ? 'pos' : 'neg'}">${dayPnl >= 0 ? '+' : ''}${dayPnl.toFixed(2)}</span>
-      <span class="pnl-bal">${s.equity?.toFixed(2) ?? s.balance.toFixed(2)}</span>
-      <span class="${(s.unrealized_pnl || 0) >= 0 ? 'pos' : 'neg'}">${(s.unrealized_pnl || 0) >= 0 ? '+' : ''}${(s.unrealized_pnl || 0).toFixed(2)}</span>
+      <span class="pnl-bal">${equity.toFixed(2)}</span>
     </div>`;
   }
 
+  const p = getPortfolioView();
   html += `<div class="pnl-total-row">
     <span>TOPLAM</span>
     <span class="${totalPnl >= 0 ? 'pos' : 'neg'}">${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}</span>
     <span class="${totalDaily >= 0 ? 'pos' : 'neg'}">${totalDaily >= 0 ? '+' : ''}${totalDaily.toFixed(2)}</span>
-    <span class="pnl-bal">${(S.portfolio?.total_equity ?? totalBal).toFixed(2)}</span>
-    <span class="${totalUnrl >= 0 ? 'pos' : 'neg'}">${totalUnrl >= 0 ? '+' : ''}${totalUnrl.toFixed(2)}</span>
+    <span class="pnl-bal">${(p?.total_equity ?? totalEquity).toFixed(2)}</span>
   </div></div>`;
 
   el.innerHTML = html;
@@ -1118,6 +1172,8 @@ async function init() {
   setupCanvasEvents();
   setupHeaderEvents();
   updateWSStatus(false);
+  const pairEl = document.getElementById('header-pair');
+  if (pairEl) pairEl.textContent = S.symbol;
 
   // Initial data load (also calls connectWS internally)
   await loadAll();
