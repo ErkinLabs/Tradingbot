@@ -45,8 +45,9 @@ def sso_login(token: str, response: Response):
         if signature != expected_sig:
             raise HTTPException(status_code=401, detail="Geçersiz SSO imzası.")
             
-        # Session çerezini ayarla
-        response.set_cookie(
+        # Session çerezini doğrudan RedirectResponse nesnesi üzerinden ayarla
+        redirect_resp = RedirectResponse(url="/", status_code=303)
+        redirect_resp.set_cookie(
             key="session", 
             value=ADMIN_SESSION_VAL, 
             httponly=True, 
@@ -54,7 +55,7 @@ def sso_login(token: str, response: Response):
             samesite="lax",
             path="/"
         )
-        return RedirectResponse(url="/", status_code=303)
+        return redirect_resp
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
