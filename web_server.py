@@ -51,7 +51,7 @@ def sso_login(token: str, response: Response):
             value=ADMIN_SESSION_VAL, 
             httponly=True, 
             secure=True, 
-            samesite="strict",
+            samesite="lax",
             path="/"
         )
         return RedirectResponse(url="/", status_code=303)
