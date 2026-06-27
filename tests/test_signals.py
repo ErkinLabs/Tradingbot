@@ -33,7 +33,7 @@ def _make_df(n: int = 100, close_prices=None) -> pd.DataFrame:
 def _bot_instance(BotClass):
     """Instantiate a bot without triggering ccxt or file I/O."""
     with (
-        patch("base_bot.config.make_exchange", return_value=MagicMock()),
+        patch("base_bot.ccxt.bybit"),
         patch("base_bot._load_state", return_value={}),
         patch("base_bot._save_state"),
     ):
@@ -45,6 +45,7 @@ def _bot_instance(BotClass):
         bot.start_balance  = 3_300.0
         bot._day_start_balance = 3_300.0
         bot.paused         = False
+        bot._day_trade_count = 0
         import threading
         bot._positions_lock = threading.Lock()
         bot._trades_lock    = threading.Lock()
@@ -73,7 +74,7 @@ class TestMACDSignal(unittest.TestCase):
         self.assertIn(result, (None, "buy", "close"))
 
     def test_no_buy_during_downtrend(self):
-        """Price below EMA200 — buy signal should be suppressed."""
+        """Price below EMA50 — buy signal should be suppressed."""
         prices = np.linspace(50_000, 30_000, 100)  # strong downtrend
         df = _make_df(n=100, close_prices=prices)
         result = self.bot.generate_signal(df, position=None)
@@ -111,7 +112,7 @@ class TestRSIVWAPSignal(unittest.TestCase):
         self.assertIn(result, (None, "buy", "close"))
 
     def test_close_signal_when_rsi_recovers(self):
-        """RSI > 55 while long should trigger close."""
+        """RSI > 50 while long should trigger close."""
         # Build prices that recover (RSI will rise above 50)
         prices = list(np.linspace(38_000, 40_000, 40)) + list(np.linspace(40_000, 43_000, 20))
         df = _make_df(n=60, close_prices=prices)
@@ -126,7 +127,7 @@ class TestRSIVWAPSignal(unittest.TestCase):
         self.assertNotEqual(result, "sell")
 
     def test_no_buy_in_strong_trend(self):
-        """ADX >= 40 (strong trend) should suppress mean-reversion buy."""
+        """ADX >= 35 (strong trend) should suppress mean-reversion buy."""
         # Steady uptrend → high ADX
         prices = np.linspace(30_000, 60_000, 80)
         df = _make_df(n=80, close_prices=prices)

@@ -1,1 +1,0 @@
-- [Strategy Backtest Baselines](project_backtest_baselines.md) — MACD BTC/USDT 2024 current (v7): +0.48% return, Sharpe -2.274, 37.25% win rate, 51 trades, PF 1.354x

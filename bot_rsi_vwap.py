@@ -80,7 +80,7 @@ class RSIVWAPBot(BaseBot):
 
         self.check_stop_loss_take_profit()
 
-        for symbol in self.trading_symbols:
+        for symbol in config.SYMBOLS:
             try:
                 self._process_symbol(symbol)
             except Exception as exc:
@@ -165,48 +165,12 @@ class RSIVWAPBot(BaseBot):
     # ── Per-symbol live logic ─────────────────────────────────────────────────
 
     def _process_symbol(self, symbol: str) -> None:
-        if symbol not in self._buffers:
-            self.log.debug("Buffer not yet attached for %s — skipping.", symbol)
-            return
-        df = self._buffers[symbol].get_df()
-        n  = len(df)
-        if n < _MIN_BARS:
-            self.log.debug("RSI_VWAP %s | bars=%d/%d — warming up", symbol, n, _MIN_BARS)
+        df = self.fetch_ohlcv(symbol, self.timeframe)
+        if len(df) < _MIN_BARS:
             return
 
         position = self.positions[symbol]["side"] if symbol in self.positions else None
         signal   = self.generate_signal(df, position)
-
-        # ── DEBUG: indicator snapshot every candle close ──────────────────────
-        try:
-            _rsi_s  = ta.rsi(df["close"], length=14)
-            _rsi    = float(_rsi_s.iloc[-1])
-            _prsi   = float(_rsi_s.iloc[-2])
-            _vwap   = float(_calc_vwap(df).iloc[-1])
-            _price  = float(df["close"].iloc[-1])
-            _bopen  = float(df["open"].iloc[-1])
-            _adxd   = ta.adx(df["high"], df["low"], df["close"], length=14)
-            _ac     = next((c for c in _adxd.columns if c.startswith("ADX_")), None)
-            _adx    = float(_adxd[_ac].iloc[-1]) if _ac else 0.0
-            _dev    = abs(_price - _vwap) / _vwap * 100 if _vwap else 0.0
-            _why = ""
-            if signal is None and position is None:
-                if _rsi >= 30:          _why = f"rsi={_rsi:.1f}≥30"
-                elif _price >= _vwap:   _why = f"price≥vwap({_price:.4f}≥{_vwap:.4f})"
-                elif _adx >= 40:        _why = f"adx={_adx:.1f}≥40"
-                elif _dev <= 0.5:       _why = f"vwap_dev={_dev:.3f}%≤0.5%"
-                elif _prsi >= _rsi:     _why = f"rsi-not-turning({_prsi:.1f}→{_rsi:.1f})"
-                elif _price <= _bopen:  _why = "bar-closing-down"
-            self.log.debug(
-                "RSI_VWAP %s | rsi=%.1f prev=%.1f vwap=%.4f price=%.4f "
-                "dev=%.3f%% adx=%.1f pos=%s → %s%s",
-                symbol, _rsi, _prsi, _vwap, _price, _dev, _adx,
-                "long" if position else "flat",
-                signal or "no_signal",
-                f" ({_why})" if _why else "",
-            )
-        except Exception:
-            pass
 
         if signal == "buy" and position is None:
             self.open_position(symbol, "long")

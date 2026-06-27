@@ -7,6 +7,7 @@ Handles:
   - Simulated position management (paper trading only)
   - Stop-loss / take-profit checks
   - Commission deduction (both open and close)
+  - Daily trade limit enforcement
   - Thread-safe access to positions and trade history
   - Trade logging (CSV + Python logging with rotation)
   - State persistence (positions + trades survive restarts)
@@ -21,47 +22,13 @@ import math
 import os
 import threading
 import time
-import urllib.parse
-import urllib.request
 from datetime import date, datetime, timezone
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import ccxt
 import pandas as pd
 
 import config
-from kline_buffer import KlineBuffer
-
-
-# ── Telegram notifier ─────────────────────────────────────────────────────────
-
-class _TelegramNotifier:
-    """
-    Fire-and-forget Telegram notifications via the Bot API.
-    Disabled automatically when TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is absent.
-    """
-
-    def __init__(self) -> None:
-        self._token   = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        self._chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-        self.enabled  = bool(self._token and self._chat_id)
-
-    def send(self, text: str) -> None:
-        """Send a message in a background thread so it never blocks the bot loop."""
-        if not self.enabled:
-            return
-        threading.Thread(target=self._post, args=(text,), daemon=True).start()
-
-    def _post(self, text: str) -> None:
-        url  = f"https://api.telegram.org/bot{self._token}/sendMessage"
-        data = urllib.parse.urlencode({"chat_id": self._chat_id, "text": text}).encode()
-        try:
-            urllib.request.urlopen(url, data=data, timeout=10)
-        except Exception:
-            pass  # non-fatal — never let a notification failure affect trading
-
-
-_tg = _TelegramNotifier()
 
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -133,13 +100,7 @@ def _load_state(bot_name: str) -> dict:
         return {}
 
 
-def _save_state(
-    bot_name: str,
-    positions: dict,
-    closed_trades: list,
-    balance: float,
-    extra: Optional[dict] = None,
-) -> None:
+def _save_state(bot_name: str, positions: dict, closed_trades: list, balance: float) -> None:
     """Persist bot state to disk. Called after every open/close."""
     path = _state_path(bot_name)
     state = {
@@ -150,8 +111,6 @@ def _save_state(
         },
         "closed_trades": closed_trades,
     }
-    if extra:
-        state.update(extra)
     try:
         with open(path, "w") as f:
             json.dump(state, f, indent=2)
@@ -210,106 +169,21 @@ class BaseBot:
         self.balance: float       = saved_balance if saved_balance is not None else default_balance
         self.start_balance: float = default_balance  # always the configured start, not restored
 
-        # Daily-loss guard (UTC day boundaries)
-        self.paused: bool = False
-        self._apply_day_state(raw)
+        # Daily-loss / daily-trade guard
+        self._day_start_balance: float = self.balance
+        self._current_day: date        = date.today()
+        self.paused: bool              = False
+        self._day_trade_count: int     = 0
 
-        # Exchange (public, no API keys) — used only for startup warmup
-        self.exchange = config.make_exchange()
-
-        # WebSocket kline buffers — keyed by symbol, attached by main.py at startup
-        self._buffers: dict[str, KlineBuffer] = {}
-
-        # Dynamic symbol list + portfolio risk (wired by main.py)
-        self._symbol_provider: Optional[Callable[[], list]] = None
-        self._portfolio_risk = None
+        # Exchange (public, no API keys)
+        self.exchange = ccxt.bybit(config.EXCHANGE_OPTS)
+        self.exchange.load_markets()
 
         restored = len(self.positions) > 0 or len(self.closed_trades) > 0
         self.log.info(
             "Initialised | balance=%.2f USDT | symbols=%s | restored=%s",
-            self.balance, self.trading_symbols, restored,
+            self.balance, config.SYMBOLS, restored,
         )
-
-    # ── Wiring (called by main.py) ────────────────────────────────────────────
-
-    def attach_symbol_provider(self, provider) -> None:
-        """Callable returning the current list of tradable symbols."""
-        self._symbol_provider = provider
-
-    def attach_portfolio_risk(self, manager) -> None:
-        self._portfolio_risk = manager
-
-    @property
-    def trading_symbols(self) -> list:
-        if self._symbol_provider:
-            return self._symbol_provider()
-        return list(config.SYMBOLS)
-
-    # ── Buffer attachment (called by main.py at startup) ─────────────────────
-
-    def attach_buffer(self, symbol: str, buffer: KlineBuffer) -> None:
-        """Attach a pre-seeded KlineBuffer for a symbol. Called before WebSocket starts."""
-        self._buffers[symbol] = buffer
-
-    @staticmethod
-    def _utc_today() -> date:
-        return datetime.now(timezone.utc).date()
-
-    def _state_extra(self) -> dict:
-        return {
-            "day_start_balance": self._day_start_balance,
-            "day_start_equity":  self._day_start_equity,
-            "current_day":       self._current_day.isoformat(),
-        }
-
-    def _apply_day_state(self, raw: dict) -> None:
-        """Restore or reset UTC daily counters."""
-        today = self._utc_today()
-        saved_day = raw.get("current_day")
-        if saved_day == today.isoformat():
-            self._current_day        = today
-            self._day_start_balance  = float(raw.get("day_start_balance", self.balance))
-            self._day_start_equity   = float(raw.get("day_start_equity", self.balance))
-        else:
-            self._reset_day_counters()
-
-    def _reset_day_counters(self) -> None:
-        self._current_day       = self._utc_today()
-        self._day_start_balance = self.balance
-        self._day_start_equity  = self.balance + self._unrealized_pnl()
-        self.paused             = False
-
-    def _persist_state(self) -> None:
-        _save_state(
-            self.name,
-            self.positions,
-            self.closed_trades,
-            self.balance,
-            self._state_extra(),
-        )
-
-    # ── WebSocket candle-close handler ────────────────────────────────────────
-
-    def on_candle_close(self, symbol: str) -> None:
-        """
-        Called by KlineStreamManager when a candle is confirmed (closed).
-        Replaces the timer-based run_once() loop for live trading.
-        Subclasses must implement _process_symbol() to consume the buffer.
-        """
-        if symbol not in self._buffers:
-            self.log.warning("on_candle_close fired for unregistered symbol %s — ignoring.", symbol)
-            return
-        # SL/TP always runs — even when daily-loss pause blocks new entries
-        self.check_stop_loss_take_profit()
-        self.check_daily_loss()
-        if self.paused:
-            return
-        if symbol not in self.trading_symbols and symbol not in self.positions:
-            return
-        try:
-            self._process_symbol(symbol)
-        except Exception as exc:
-            self.log.error("Error processing %s: %s", symbol, exc, exc_info=True)
 
     # ── Market data (with retry) ──────────────────────────────────────────────
 
@@ -345,14 +219,6 @@ class BaseBot:
                 raise
 
     def current_price(self, symbol: str) -> float:
-        """
-        Return the current price for a symbol.
-        Hot path (WebSocket): reads last confirmed close from the KlineBuffer.
-        Fallback (warmup / buffer not yet attached): falls back to REST ticker.
-        """
-        buf = self._buffers.get(symbol)
-        if buf is not None and buf.last_price is not None:
-            return buf.last_price
         ticker = self.fetch_ticker(symbol)
         return float(ticker["last"])
 
@@ -361,19 +227,20 @@ class BaseBot:
     def open_position(self, symbol: str, side: str) -> None:
         """
         Simulate opening a position. Deducts commission from balance.
+        Enforces MAX_DAILY_TRADES limit.
         """
         if not config.PAPER_TRADING:
             raise RuntimeError("Real trading is disabled.")
 
-        if self._portfolio_risk is not None:
-            ok, reason = self._portfolio_risk.can_open(self, symbol)
-            if not ok:
-                self.log.debug("OPEN blocked (%s): %s %s", reason, self.name, symbol)
-                return
-
         with self._positions_lock:
             if symbol in self.positions:
                 self.log.debug("Already in a position for %s — skipping.", symbol)
+                return
+
+            if self._day_trade_count >= config.MAX_DAILY_TRADES:
+                self.log.info(
+                    "Daily trade limit (%d) reached — skipping %s.", config.MAX_DAILY_TRADES, symbol
+                )
                 return
 
             price    = self.current_price(symbol)
@@ -383,19 +250,13 @@ class BaseBot:
 
             self.balance -= comm
             self.positions[symbol] = _new_position(symbol, side, price, size)
+            self._day_trade_count += 1
 
         self.log.info(
             "OPEN %s %s | price=%.4f | size=%.6f | notional=%.2f | commission=%.4f USDT",
             side.upper(), symbol, price, size, notional, comm,
         )
-        _tg.send(
-            f"📈 [{self.name}] OPEN {side.upper()}\n"
-            f"Symbol : {symbol}\n"
-            f"Price  : {price:.4f} USDT\n"
-            f"Size   : {size:.6f}\n"
-            f"Notional: {notional:.2f} USDT"
-        )
-        self._persist_state()
+        _save_state(self.name, self.positions, self.closed_trades, self.balance)
 
     def close_position(self, symbol: str, reason: str = "signal") -> Optional[float]:
         """
@@ -431,41 +292,18 @@ class BaseBot:
             self.closed_trades.append(trade)
 
         _append_trade_csv(trade)
-        self._persist_state()
+        _save_state(self.name, self.positions, self.closed_trades, self.balance)
 
         self.log.info(
             "CLOSE %s | entry=%.4f exit=%.4f | gross=%.4f comm=%.4f net=%.4f | reason=%s",
             symbol, pos["entry_price"], price, gross_pnl, comm, net_pnl, reason,
         )
-        emoji  = "✅" if net_pnl >= 0 else "❌"
-        pnl_sign = "+" if net_pnl >= 0 else ""
-        _tg.send(
-            f"{emoji} [{self.name}] CLOSE\n"
-            f"Symbol : {symbol}\n"
-            f"Entry  : {pos['entry_price']:.4f} → Exit: {price:.4f} USDT\n"
-            f"Net PnL: {pnl_sign}{net_pnl:.4f} USDT\n"
-            f"Reason : {reason}"
-        )
         return net_pnl
 
     # ── Risk management ───────────────────────────────────────────────────────
 
-    def _bar_range_for_sl_tp(self, symbol: str) -> tuple[float, float]:
-        """
-        Return (low, high) for intra-bar SL/TP checks.
-        Uses the in-progress kline from the WebSocket buffer when available.
-        """
-        buf = self._buffers.get(symbol)
-        if buf is not None:
-            df = buf.get_df()
-            if not df.empty:
-                bar = df.iloc[-1]
-                return float(bar["low"]), float(bar["high"])
-        price = self.current_price(symbol)
-        return price, price
-
     def check_stop_loss_take_profit(self) -> None:
-        """Check all open positions and close on SL/TP breach (uses bar high/low)."""
+        """Check all open positions and close on SL/TP breach."""
         with self._positions_lock:
             symbols = list(self.positions.keys())
 
@@ -473,47 +311,30 @@ class BaseBot:
             with self._positions_lock:
                 if symbol not in self.positions:
                     continue
-                entry = self.positions[symbol]["entry_price"]
+                pos   = self.positions[symbol]
+                price = self.current_price(symbol)
+                entry = pos["entry_price"]
 
-            low, high = self._bar_range_for_sl_tp(symbol)
-            sl_price = entry * (1 - config.STOP_LOSS_PCT)
-            tp_price = entry * (1 + config.TAKE_PROFIT_PCT)
+            pct_change = (price - entry) / entry  # spot: long only
 
-            if low <= sl_price:
+            if pct_change <= -config.STOP_LOSS_PCT:
                 self.close_position(symbol, reason="stop_loss")
-            elif high >= tp_price:
+            elif pct_change >= config.TAKE_PROFIT_PCT:
                 self.close_position(symbol, reason="take_profit")
-
-    def _unrealized_pnl(self) -> float:
-        """Mark-to-market P&L for all open positions."""
-        total = 0.0
-        with self._positions_lock:
-            items = list(self.positions.items())
-        for symbol, pos in items:
-            price = self.current_price(symbol)
-            total += (price - pos["entry_price"]) * pos["size"]
-        return total
-
-    def _trades_today(self, trades: list) -> list:
-        today = self._utc_today()
-        return [
-            t for t in trades
-            if datetime.fromisoformat(t["timestamp"]).astimezone(timezone.utc).date() == today
-        ]
 
     def check_daily_loss(self) -> bool:
         """
-        Reset daily counters at UTC midnight.
+        Reset daily counters at midnight.
         Pause bot for the day if MAX_DAILY_LOSS_PCT is breached.
         Returns True if bot is (or becomes) paused.
         """
-        today = self._utc_today()
+        today = date.today()
         if today != self._current_day:
-            self._reset_day_counters()
-            self.log.info("New trading day (UTC) — daily counters reset.")
-
-        if self._day_start_balance <= 0:
-            return self.paused
+            self._current_day       = today
+            self._day_start_balance = self.balance
+            self._day_trade_count   = 0
+            self.paused             = False
+            self.log.info("New trading day — daily counters reset.")
 
         daily_loss_pct = (self._day_start_balance - self.balance) / self._day_start_balance
         if daily_loss_pct >= config.MAX_DAILY_LOSS_PCT:
@@ -531,38 +352,22 @@ class BaseBot:
         with self._trades_lock:
             trades = list(self.closed_trades)
 
-        n            = len(trades)
-        wins         = sum(1 for t in trades if t["net_pnl"] > 0)
-        win_rate     = (wins / n * 100) if n else 0.0
-        total_pnl    = sum(t["net_pnl"] for t in trades)
-        return_pct   = ((self.balance - self.start_balance) / self.start_balance) * 100
-        sharpe       = self._sharpe(trades)
-        unrealized   = self._unrealized_pnl()
-        equity       = self.balance + unrealized
-        today_trades = self._trades_today(trades)
-        daily_realized = sum(t["net_pnl"] for t in today_trades)
-        daily_pnl    = equity - self._day_start_equity
-        daily_pct    = (daily_pnl / self._day_start_equity * 100) if self._day_start_equity else 0.0
-        balance_chg  = self.balance - self._day_start_balance
+        n         = len(trades)
+        wins      = sum(1 for t in trades if t["net_pnl"] > 0)
+        win_rate  = (wins / n * 100) if n else 0.0
+        total_pnl = sum(t["net_pnl"] for t in trades)
+        return_pct = ((self.balance - self.start_balance) / self.start_balance) * 100
+        sharpe     = self._sharpe(trades)
 
         return {
-            "bot":                self.name,
-            "trades":             n,
-            "trades_today":       len(today_trades),
-            "wins_today":         sum(1 for t in today_trades if t["net_pnl"] > 0),
-            "win_rate":           round(win_rate, 2),
-            "total_pnl":          round(total_pnl, 4),
-            "daily_pnl":          round(daily_pnl, 4),
-            "daily_pnl_pct":      round(daily_pct, 2),
-            "daily_realized_pnl": round(daily_realized, 4),
-            "daily_balance_chg":  round(balance_chg, 4),
-            "unrealized_pnl":     round(unrealized, 4),
-            "equity":             round(equity, 2),
-            "sharpe":             round(sharpe, 3),
-            "balance":            round(self.balance, 2),
-            "start_balance":      round(self.start_balance, 2),
-            "return_pct":         round(return_pct, 2),
-            "paused":             self.paused,
+            "bot":        self.name,
+            "trades":     n,
+            "win_rate":   round(win_rate, 2),
+            "total_pnl":  round(total_pnl, 4),
+            "sharpe":     round(sharpe, 3),
+            "balance":    round(self.balance, 2),
+            "return_pct": round(return_pct, 2),
+            "paused":     self.paused,
         }
 
     def _sharpe(self, trades: list) -> float:
@@ -583,5 +388,5 @@ class BaseBot:
     # ── Entry point (subclasses override) ────────────────────────────────────
 
     def run_once(self) -> None:
-        """Legacy polling hook — live trading uses on_candle_close() instead."""
+        """Called every BOT_LOOP_SECS by main.py. Override in each strategy."""
         raise NotImplementedError
