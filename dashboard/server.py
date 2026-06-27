@@ -71,22 +71,96 @@ async def sso_and_visitor_middleware(request: Request, call_next):
     if session_cookie != ADMIN_SESSION_VAL:
         # Erişim Engellendi HTML sayfasını dön
         denied_html = """
+        <!DOCTYPE html>
         <html>
             <head>
-                <title>Crypto Trading Bot - Yetkisiz Erişim</title>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <title>Crypto Trading Bot - Algoritmik Al-Sat Robotu</title>
                 <script src="https://cdn.tailwindcss.com"></script>
+                <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+                <style>
+                    body {
+                        font-family: 'Plus Jakarta Sans', sans-serif;
+                    }
+                    .font-mono {
+                        font-family: 'JetBrains Mono', monospace;
+                    }
+                    .neon-border {
+                        box-shadow: 0 0 15px rgba(6, 182, 212, 0.15);
+                    }
+                    .neon-border:hover {
+                        box-shadow: 0 0 25px rgba(6, 182, 212, 0.35);
+                    }
+                </style>
             </head>
-            <body class="bg-gray-950 text-white min-h-screen flex items-center justify-center font-sans p-6">
-                <div class="max-w-md w-full text-center bg-gray-900 border border-gray-800 rounded-2xl p-8 shadow-xl">
-                    <div class="w-16 h-16 bg-red-500/10 border border-red-500/30 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-8 h-8">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                        </svg>
+            <body class="bg-[#030712] text-gray-100 min-h-screen flex flex-col justify-between selection:bg-cyan-500/30 selection:text-cyan-200">
+                
+                <!-- Navbar -->
+                <header class="max-w-7xl w-full mx-auto px-6 py-6 flex justify-between items-center border-b border-gray-900">
+                    <div class="flex items-center gap-3">
+                        <span class="w-10 h-10 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 rounded-xl flex items-center justify-center font-extrabold text-xl">🤖</span>
+                        <span class="text-xl font-bold tracking-tight bg-gradient-to-r from-cyan-400 to-indigo-400 bg-clip-text text-transparent">cryptoTrader</span>
                     </div>
-                    <h1 class="text-xl font-bold mb-2">Erişim Engellendi</h1>
-                    <p class="text-gray-400 text-sm mb-6">Bu panele erişmek için yetkiniz bulunmamaktadır. Lütfen ErkinLabs Konsolu üzerinden güvenli bağlantı kurun.</p>
-                    <a href="https://consol.erkinlabs.com" class="inline-block w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold rounded-xl transition-all">ErkinLabs Konsolu'na Git</a>
-                </div>
+                    <a href="https://consol.erkinlabs.com" class="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold rounded-xl transition-all shadow-lg shadow-cyan-900/20 active:scale-95">Konsol Girişi</a>
+                </header>
+
+                <!-- Hero Section -->
+                <main class="max-w-5xl w-full mx-auto px-6 py-16 text-center">
+                    <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-semibold mb-8">
+                        <span class="w-2 h-2 rounded-full bg-cyan-500 animate-pulse"></span>
+                        7/24 Otomatik Algoritmik Al-Sat
+                    </div>
+                    
+                    <h1 class="text-4xl md:text-6xl font-extrabold tracking-tight mb-6 leading-none">
+                        Yapay Zeka Destekli<br />
+                        <span class="bg-gradient-to-r from-cyan-400 via-teal-400 to-indigo-400 bg-clip-text text-transparent">Kripto Al-Sat Robotu</span>
+                    </h1>
+                    
+                    <p class="text-gray-400 text-lg md:text-xl max-w-2xl mx-auto mb-10 leading-relaxed">
+                        CVD (Cumulative Volume Delta), MACD ve RSI-VWAP indikatörleri ile güçlendirilmiş, Binance ve küresel borsalarda anlık piyasa analizi yapan gelişmiş işlem algoritması.
+                    </p>
+
+                    <div class="flex flex-col sm:flex-row justify-center gap-4 mb-20">
+                        <a href="https://consol.erkinlabs.com" class="px-8 py-4 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-semibold rounded-2xl transition-all shadow-xl shadow-cyan-900/30 active:scale-95">Robot Panelini Başlat</a>
+                        <a href="#features" class="px-8 py-4 bg-gray-900/50 hover:bg-gray-900 border border-gray-800 text-gray-300 hover:text-white font-semibold rounded-2xl transition-all">Özellikleri İncele</a>
+                    </div>
+
+                    <!-- Features Grid -->
+                    <section id="features" class="py-12 border-t border-gray-900 text-left">
+                        <h2 class="text-2xl font-bold mb-10 text-center text-cyan-400">Gelişmiş Algoritma Yetenekleri</h2>
+                        <div class="grid md:grid-cols-3 gap-6">
+                            
+                            <!-- Card 1 -->
+                            <div class="bg-gray-900/30 border border-gray-800/80 rounded-2xl p-6 hover:border-cyan-500/30 transition-all neon-border">
+                                <span class="text-3xl mb-4 block">🤖</span>
+                                <h3 class="text-lg font-semibold mb-2">Çoklu Strateji Modülü</h3>
+                                <p class="text-gray-400 text-sm leading-relaxed">Trend takip eden MACD, aşırı alım/satım bölgelerini yakalayan RSI-VWAP ve hacim eğilimlerini izleyen CVD botları ile her piyasa koşuluna uyum sağlar.</p>
+                            </div>
+
+                            <!-- Card 2 -->
+                            <div class="bg-gray-900/30 border border-gray-800/80 rounded-2xl p-6 hover:border-cyan-500/30 transition-all neon-border">
+                                <span class="text-3xl mb-4 block">📈</span>
+                                <h3 class="text-lg font-semibold mb-2">Canlı Performans & Defter</h3>
+                                <p class="text-gray-400 text-sm leading-relaxed">Cüzdan bakiyesini, anlık P&L durumlarını, açık pozisyonları ve son 10 işlemi gecikmesiz olarak arayüzde canlı grafiklerle takip edin.</p>
+                            </div>
+
+                            <!-- Card 3 -->
+                            <div class="bg-gray-900/30 border border-gray-800/80 rounded-2xl p-6 hover:border-cyan-500/30 transition-all neon-border">
+                                <span class="text-3xl mb-4 block">🛡️</span>
+                                <h3 class="text-lg font-semibold mb-2">Risk Kontrol & Stop-Loss</h3>
+                                <p class="text-gray-400 text-sm leading-relaxed">Sermayeyi korumak için entegre dinamik kaldıraç kontrolleri, otomatik Stop-Loss ve Take-Profit limit takipleri ile yüksek güvenlikli işlem yönetimi.</p>
+                            </div>
+
+                        </div>
+                    </section>
+                </main>
+
+                <!-- Footer -->
+                <footer class="max-w-7xl w-full mx-auto px-6 py-8 border-t border-gray-900 text-center text-xs text-gray-600">
+                    <p>© 2026 ErkinLabs. Tüm hakları saklıdır. Bu panel sadece yetkili kullanıcıların erişimine açıktır.</p>
+                </footer>
+
             </body>
         </html>
         """
