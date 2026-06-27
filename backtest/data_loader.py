@@ -13,6 +13,8 @@ from pathlib import Path
 
 import ccxt
 import pandas as pd
+
+import config
 from rich.progress import (
     BarColumn,
     Progress,
@@ -62,7 +64,8 @@ class DataLoader:
 
     def __init__(self) -> None:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        self.exchange = ccxt.bybit({"defaultType": "linear"})
+        exchange_cls = getattr(ccxt, config.EXCHANGE_ID)
+        self.exchange = exchange_cls(config.EXCHANGE_OPTS)
         self.exchange.load_markets()
 
     # ── Public API ─────────────────────────────────────────────────────────────

@@ -211,6 +211,7 @@ class BacktestEngine:
                     "entry_bar":        i,
                     "size":             size,
                     "entry_commission": entry_comm,
+                    "peak_price":       entry_price,  # trailing stop tracking
                 }
                 pending_open = None
 
@@ -246,18 +247,30 @@ class BacktestEngine:
                 if daily_loss_frac >= config.MAX_DAILY_LOSS_PCT:
                     day_paused = True
 
+            # ── Update trailing-stop peak (close of each bar while in position) ──
+            if position is not None:
+                position["peak_price"] = max(
+                    position["peak_price"], float(bar["close"])
+                )
+
             # ── Generate signal (only when not paused or pending) ─────────────
             if (
                 not day_paused
-                and day_trades < config.MAX_DAILY_TRADES
                 and pending_open is None
                 and not pending_close
                 # need at least one more bar to fill the order
                 and i < n - 1
             ):
-                pos_side = position["side"] if position else None
+                pos_context = (
+                    {
+                        "side":       position["side"],
+                        "bars_held":  i - position["entry_bar"],
+                        "peak_price": position["peak_price"],
+                    }
+                    if position else None
+                )
                 try:
-                    signal = self.strategy.generate_signal(df.iloc[: i + 1], pos_side)
+                    signal = self.strategy.generate_signal(df.iloc[: i + 1], pos_context)
                 except Exception:
                     signal = None
 

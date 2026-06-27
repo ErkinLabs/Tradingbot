@@ -2,20 +2,20 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# System dependencies for python packages if needed (like gcc, etc.)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
+# Install dependencies first (layer cache)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt fastapi uvicorn
+RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy source
 COPY . .
 
-# logs klasörünü oluştur ve izinleri ayarla
-RUN mkdir -p logs
+# Disable Rich terminal dashboard (no TTY in container)
+ENV HEADLESS=true
 
-EXPOSE 3005
+# Persist logs outside the container via a volume mount
+VOLUME ["/app/logs"]
 
-# Trading bot'u arka planda, FastAPI web sunucusunu ön planda başlatan betik
-CMD ["sh", "-c", "python main.py & uvicorn web_server:app --host 0.0.0.0 --port 3005"]
+# Web dashboard port
+EXPOSE 7000
+
+CMD ["python", "main.py", "--with-dashboard"]

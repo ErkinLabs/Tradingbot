@@ -23,12 +23,14 @@ def _make_bot(balance: float = 3_300.0):
         name = "TEST"
         def run_once(self): pass
 
+    mock_exchange = MagicMock()
     with (
-        patch("base_bot.ccxt.bybit"),
+        patch("base_bot.config.make_exchange", return_value=mock_exchange),
         patch("base_bot._load_state", return_value={}),
         patch("base_bot._save_state"),
     ):
         bot = ConcreteBot()
+    bot.exchange = mock_exchange
     bot.balance = balance
     bot.start_balance = balance
     bot._day_start_balance = balance
@@ -125,31 +127,11 @@ class TestDailyLossGuard(unittest.TestCase):
         self.bot.check_daily_loss()
         self.assertTrue(self.bot.paused)
 
-        from datetime import date, timedelta
-        self.bot._current_day = date.today() - timedelta(days=1)
+        from datetime import timedelta
+        self.bot._current_day = self.bot._utc_today() - timedelta(days=1)
         self.bot.check_daily_loss()
         self.assertFalse(self.bot.paused)
-        self.assertEqual(self.bot._day_trade_count, 0)
-
-
-# ── Daily trade limit ─────────────────────────────────────────────────────────
-
-class TestDailyTradeLimit(unittest.TestCase):
-
-    def setUp(self):
-        self.bot = _make_bot()
-        self.bot.exchange.fetch_ticker = MagicMock(return_value={"last": 40_000.0})
-
-    def test_cannot_exceed_max_daily_trades(self):
-        limit = config.MAX_DAILY_TRADES
-        symbols = [f"COIN{i}/USDT" for i in range(limit + 2)]
-        for sym in symbols:
-            self.bot.open_position(sym, "long")
-        self.assertLessEqual(len(self.bot.positions), limit)
-
-    def test_counter_increments_on_open(self):
-        self.bot.open_position("BTC/USDT", "long")
-        self.assertEqual(self.bot._day_trade_count, 1)
+        self.assertEqual(self.bot._day_start_balance, self.bot.balance)
 
 
 # ── SL / TP ───────────────────────────────────────────────────────────────────
@@ -186,6 +168,49 @@ class TestStopLossTakeProfit(unittest.TestCase):
         self._open_and_set_price(safe_price)
         self.bot.check_stop_loss_take_profit()
         self.assertIn("BTC/USDT", self.bot.positions)
+
+    def test_sl_tp_runs_when_paused_on_candle_close(self):
+        """Daily-loss pause must not block SL/TP on candle close."""
+        from kline_buffer import KlineBuffer
+        import pandas as pd
+        import numpy as np
+
+        self.bot.paused = True
+        buf = KlineBuffer(maxlen=50)
+        idx = pd.date_range("2024-01-01", periods=5, freq="5min", tz="UTC")
+        df = pd.DataFrame(
+            {
+                "open":   [40_000.0] * 5,
+                "high":   [40_000.0] * 5,
+                "low":    [38_000.0] * 5,
+                "close":  [39_000.0] * 5,
+                "volume": [100.0] * 5,
+            },
+            index=idx,
+        )
+        buf.seed(df)
+        self.bot.attach_buffer("BTC/USDT", buf)
+        self.bot.open_position("BTC/USDT", "long")
+        with patch.object(self.bot, "_process_symbol") as mock_proc:
+            self.bot.on_candle_close("BTC/USDT")
+        mock_proc.assert_not_called()
+        self.assertNotIn("BTC/USDT", self.bot.positions)
+
+
+class TestStats(unittest.TestCase):
+
+    def setUp(self):
+        self.bot = _make_bot()
+        self.bot.exchange.fetch_ticker = MagicMock(return_value={"last": 40_000.0})
+
+    def test_get_stats_includes_daily_and_equity(self):
+        self.bot.open_position("BTC/USDT", "long")
+        self.bot.exchange.fetch_ticker = MagicMock(return_value={"last": 41_000.0})
+        s = self.bot.get_stats()
+        self.assertIn("daily_pnl", s)
+        self.assertIn("equity", s)
+        self.assertIn("unrealized_pnl", s)
+        self.assertGreater(s["unrealized_pnl"], 0)
 
 
 # ── Thread safety ─────────────────────────────────────────────────────────────

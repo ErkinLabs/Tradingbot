@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trading Bot Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <!-- ── Header (full width) ── -->
+  <header id="header">
+    <div class="header-left">
+      <div class="tf-selector" id="tf-selector">
+        <button class="tf-btn" data-tf="1m">1m</button>
+        <button class="tf-btn active" data-tf="5m">5m</button>
+        <button class="tf-btn" data-tf="15m">15m</button>
+        <button class="tf-btn" data-tf="1h">1h</button>
+        <button class="tf-btn" data-tf="4h">4h</button>
+        <button class="tf-btn" data-tf="1d">1d</button>
+      </div>
+    </div>
+    <div class="header-center">
+      <div class="price-strip">
+        <span class="price-pair" id="header-pair">BTC/USDT</span>
+        <span id="live-price">—</span>
+        <span id="price-change">—</span>
+      </div>
+      <span id="price-meta">H: — &nbsp; L: — &nbsp; Vol: —</span>
+    </div>
+    <div class="header-right">
+      <span class="ws-dot disconnected" id="ws-dot"></span>
+      <span class="ws-label" id="ws-label">disconnected</span>
+    </div>
+  </header>
+
+  <!-- ── Main Layout ── -->
+  <div id="main-layout">
+
+    <!-- ── Left: tradable universe ── -->
+    <aside id="universe-panel">
+      <div class="uni-header">
+        <span class="uni-title">İşlem Evreni</span>
+        <span id="uni-count" class="uni-badge">—</span>
+      </div>
+      <div id="universe-meta" class="uni-meta">yükleniyor…</div>
+      <div id="universe-list" class="universe-list">
+        <div class="rp-empty">Loading…</div>
+      </div>
+    </aside>
+
+    <!-- ── Center: chart + controls ── -->
+    <div id="chart-side">
+      <div id="chart-container">
+        <canvas id="chart"></canvas>
+      </div>
+      <div id="controls">
+        <div class="panel-toggles">
+          <span class="ctrl-label">Panels:</span>
+          <button class="panel-btn active" data-panel="macd">MACD</button>
+          <button class="panel-btn active" data-panel="rsi">RSI</button>
+          <button class="panel-btn" data-panel="cvd">CVD</button>
+        </div>
+        <div class="legend">
+          <span class="legend-item" data-bot="MACD">
+            <span class="legend-dot" style="background:#3b82f6"></span>MACD
+          </span>
+          <span class="legend-item" data-bot="RSI_VWAP">
+            <span class="legend-dot" style="background:#a855f7"></span>RSI+VWAP
+          </span>
+          <span class="legend-item" data-bot="CVD">
+            <span class="legend-dot" style="background:#f59e0b"></span>CVD
+          </span>
+          <span class="legend-ema">
+            <span class="legend-line ema20"></span>EMA20
+            <span class="legend-line ema50"></span>EMA50
+          </span>
+        </div>
+      </div>
+    </div><!-- #chart-side -->
+
+    <!-- ── Right: info panel ── -->
+    <div id="right-panel">
+
+      <!-- Portfolio summary cards -->
+      <div class="rp-section rp-portfolio" id="portfolio-section">
+        <div class="portfolio-grid">
+          <div class="portfolio-card portfolio-card--hero">
+            <span class="portfolio-label">Toplam Kasa</span>
+            <span class="portfolio-value" id="wallet-equity">—</span>
+            <span class="portfolio-sub" id="wallet-balance-sub">equity</span>
+          </div>
+          <div class="portfolio-card">
+            <span class="portfolio-label">Bugün (UTC)</span>
+            <span class="portfolio-value" id="wallet-daily">—</span>
+            <span class="portfolio-sub" id="wallet-daily-sub">—</span>
+          </div>
+          <div class="portfolio-card">
+            <span class="portfolio-label">Toplam P&amp;L</span>
+            <span class="portfolio-value" id="wallet-total-pnl">—</span>
+            <span class="portfolio-sub" id="wallet-return-sub">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 1: P&L Overview -->
+      <div class="rp-section" id="pnl-section">
+        <div class="rp-title">Bot Performansı</div>
+        <div id="pnl-content"><div class="rp-empty">Loading…</div></div>
+      </div>
+
+      <!-- Section 2: Open Positions -->
+      <div class="rp-section" id="positions-section">
+        <div class="rp-title">
+          Open Positions
+          <span id="pos-count" class="rp-badge"></span>
+        </div>
+        <div id="positions-content"><div class="rp-empty">No open positions</div></div>
+      </div>
+
+      <!-- Section 3: Recent Trades (scrollable) -->
+      <div class="rp-section rp-grow" id="trades-section">
+        <div class="rp-title">Recent Trades <span class="rp-subtitle">last 10</span></div>
+        <div id="trades-content" class="trades-scroll">
+          <div class="rp-empty">No trades yet</div>
+        </div>
+      </div>
+
+    </div><!-- #right-panel -->
+
+  </div><!-- #main-layout -->
+
+  <!-- ── Status Bar ── -->
+  <div id="status-bar">
+    <div id="status-bots"></div>
+  </div>
+
+  <!-- ── Tooltip ── -->
+  <div id="tooltip" class="hidden"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

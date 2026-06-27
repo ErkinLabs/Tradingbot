@@ -1,67 +1,99 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repository.
 
 ## Commands
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
 
-# Run paper trading (all 3 bots, live market data)
+# Paper trading (WebSocket-driven, not polling)
 python main.py
+python main.py --with-dashboard
 
-# Backtest a single strategy
+# Backtest
 python run_backtest.py --strategy macd --symbol BTC/USDT --start 2024-01-01 --end 2024-12-31
-python run_backtest.py --strategy rsi_vwap --symbol SOL/USDT --start 2024-06-01 --end 2024-12-31
-python run_backtest.py --strategy cvd --symbol BTC/USDT --start 2024-01-01 --end 2024-12-31
-
-# Backtest all strategies with comparison report
 python run_backtest.py --all --symbol BTC/USDT --start 2024-01-01 --end 2024-12-31
 
-# Custom balance/commission
-python run_backtest.py --strategy macd --symbol BTC/USDT --start 2024-01-01 --end 2024-12-31 --balance 5000 --commission 0.00055
+# Tests
+python -m pytest tests/ -v
 ```
-
-No test suite exists yet. No linter is configured.
 
 ## Architecture
 
 ### Live Paper Trading
 
-`main.py` starts three bots in separate threads. Each bot calls `run_once()` every `BOT_LOOP_SECS` (60s). A `Dashboard` instance auto-refreshes the Rich terminal UI every 10s. Graceful shutdown via SIGINT/SIGTERM prints final stats.
+`main.py` starts three bots. Each bot receives `on_candle_close(symbol)` from `KlineStreamManager` when a kline confirms. A background `_risk_guard_loop` polls SL/TP every `SL_TP_CHECK_SECS` (default 5s). Terminal dashboard refreshes every second; optional web dashboard on port 7000.
 
 ### Strategy Bots
 
-All three bots inherit from `BaseBot` (`base_bot.py`), which provides:
-- `ccxt.bybit` exchange connection (public API only — no credentials required)
-- `fetch_ohlcv()` / `fetch_ticker()` / `current_price()`
-- Simulated position management: one position per symbol max, sized at `MAX_POSITION_PCT` of bot balance
-- SL/TP checking, daily-loss guard (pauses bot if drawdown exceeds `MAX_DAILY_LOSS_PCT`)
-- Trade logging to `logs/trades.csv` and `logs/trading.log`
-- `get_stats()` → trades, win rate, PnL, Sharpe, balance
+All bots inherit `BaseBot` (`base_bot.py`):
 
-Each bot must implement `generate_signal(df, position) → "buy" | "sell" | "close" | None`. This is the **shared interface** used by both live trading (`run_once` → `_process_symbol`) and backtesting.
+- Exchange via `config.make_exchange()` (spot Bybit by default)
+- WebSocket kline buffers for OHLCV + intra-bar high/low SL/TP
+- Simulated positions, commission, daily-loss guard (pauses entries only)
+- State persistence in `logs/state_<BOT>.json`
+- Trade log: `logs/trades.csv`
 
-| Bot | File | Timeframe | Signal logic |
-|-----|------|-----------|--------------|
-| MACD | `bot_macd.py` | 5m | MACD histogram zero-cross (long only) + EMA50 filter + volume spike (2×SMA) |
-| RSI+VWAP | `bot_rsi_vwap.py` | 1h | RSI oversold (long only) + price vs VWAP + ADX<35 filter |
-| CVD | `bot_cvd.py` | 15m | Bullish CVD divergence (long only) + EMA50 + 2-bar confirmation |
+Shared interface: `generate_signal(df, position) → "buy" | "close" | None`
 
-### Backtest System (`backtest/`)
+| Bot | File | Timeframe |
+|-----|------|-----------|
+| MACD | `bot_macd.py` | 5m |
+| RSI+VWAP | `bot_rsi_vwap.py` | 1h (VWAP resets UTC midnight) |
+| CVD | `bot_cvd.py` | 15m (bar-direction proxy; see `cvd_utils.py`) |
 
-- **`DataLoader`** (`data_loader.py`): fetches paginated OHLCV from Bybit via ccxt, caches to Parquet in `backtest/cache/`
-- **`BacktestEngine`** (`engine.py`): bar-by-bar simulation. Key rules: no lookahead (strategy sees only `df.iloc[:i+1]`), fills at next bar's open (1-bar delay), SL/TP checked intra-bar using high/low
-- **`calculate_metrics`** (`metrics.py`): Sharpe, Sortino, Calmar, max drawdown, profit factor, avg hold time, etc.
-- **`generate_report` / `generate_comparison_report`** (`report.py`): HTML reports written to `backtest/reports/`
+### Backtest (`backtest/`)
+
+- `DataLoader`: spot OHLCV via `config.make_exchange()`, parquet cache in `backtest/cache/`
+- `BacktestEngine`: no lookahead, next-bar open fills, intra-bar SL/TP on high/low
+- `metrics.py`, `report.py`: HTML reports in `backtest/reports/`
 
 ### Configuration (`config.py`)
 
-Single source of truth for all parameters: capital allocation, symbols, risk params (SL 1.5%, TP 3%, max 10% position size), timeframes, exchange settings, and loop intervals. `PAPER_TRADING = True` is enforced as an assertion in `BaseBot.__init__` and `main()`. Exchange type is `spot` (no leverage, long-only).
+Single source of truth. `PAPER_TRADING = True` is enforced. Never commit `.env`.
 
-### Adding a New Strategy
+### Web Dashboard Auth
 
-1. Create `bot_<name>.py`, subclass `BaseBot`, set `name = "<NAME>"`, implement `generate_signal(df, position)` and `run_once()`
-2. Add the bot's timeframe and allocation to `config.py`
-3. Register it in `run_backtest.py`'s `_make_strategy()` mapping and `main.py`'s bot list
+Set `DASHBOARD_API_KEY` in `.env` to require `X-API-Key` header on `/api/*`. `/health` is always public.
+
+## Stack
+
+- Python 3.11+
+- ccxt (REST warmup + backtest data)
+- websocket-client (Bybit V5 kline stream)
+- pandas_ta, pandas, numpy
+- rich (terminal UI), FastAPI (web UI)
+- pytest + httpx (tests)
+
+## Rules (Critical)
+
+- `PAPER_TRADING = True` — never disable without explicit user request
+- No API secrets in code — use `.env`
+- All parameters in `config.py`
+- One strategy per `bot_*.py` file
+- Do not change `generate_signal()` signature — backtest depends on it
+
+## Project Structure
+
+```
+trading-bots/
+├── main.py
+├── base_bot.py
+├── bot_macd.py / bot_rsi_vwap.py / bot_cvd.py
+├── cvd_utils.py
+├── config.py
+├── kline_stream.py / kline_buffer.py
+├── terminal_dashboard.py
+├── run_backtest.py
+├── dashboard/          # FastAPI web UI
+├── backtest/
+├── tests/
+└── logs/
+```
+
+## Adding a Strategy
+
+1. Create `bot_<name>.py` with `generate_signal()` and `_process_symbol()`
+2. Add allocation + timeframe to `config.py`
+3. Register in `run_backtest.py` and `main.py`
